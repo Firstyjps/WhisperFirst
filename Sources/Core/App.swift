@@ -57,7 +57,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     private func updateIcon() {
         let name: String
         switch controller.state {
-        case .idle: name = AX.trusted ? "waveform" : "exclamationmark.triangle"
+        case .idle:
+            // โลโก้ W (MenuBarIconTemplate.png + @2x ใน Contents/Resources) — ไม่มีไฟล์ค่อยใช้ SF Symbol
+            if AX.trusted, let logo = NSImage(named: "MenuBarIconTemplate") {
+                logo.isTemplate = true
+                logo.accessibilityDescription = "WhisperFirst"
+                statusItem.button?.image = logo
+                return
+            }
+            name = AX.trusted ? "waveform" : "exclamationmark.triangle"
         case .recording: name = "mic.fill"
         case .processing: name = "ellipsis.circle"
         }

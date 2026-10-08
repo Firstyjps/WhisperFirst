@@ -29,9 +29,8 @@ if [[ ! -f "$SUPPORT/.env" ]]; then
 fi
 
 # 3) ตัวแอป — เฉพาะเมื่อเปลี่ยน
-ICON="$BIN_DIR/icon-1024.png"
-[[ -f "$ICON" ]] || swift scripts/make-icon.swift "$ICON"
-STAMP=$(cat "$BIN_DIR/WhisperFirst" Info.plist scripts/make-icon.swift | shasum -a 256 | cut -c1-16)
+# โลโก้ (7b "Echo") อยู่ใน Resources/ — AppIcon.icns + ไอคอน menu bar (template PNG)
+STAMP=$(cat "$BIN_DIR/WhisperFirst" Info.plist Resources/AppIcon.icns Resources/MenuBarIconTemplate*.png | shasum -a 256 | cut -c1-16)
 if [[ "$(cat "$APP/Contents/Resources/.stamp" 2>/dev/null)" != "$STAMP" ]]; then
   echo "⚠️  ตัวแอปเปลี่ยน → ติดตั้งใหม่ (อาจต้องให้สิทธิ์ไมค์/Accessibility อีกครั้ง)"
   pkill -x WhisperFirst 2>/dev/null || true
@@ -39,12 +38,7 @@ if [[ "$(cat "$APP/Contents/Resources/.stamp" 2>/dev/null)" != "$STAMP" ]]; then
   mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
   cp "$BIN_DIR/WhisperFirst" "$APP/Contents/MacOS/WhisperFirst"
   cp Info.plist "$APP/Contents/Info.plist"
-  ICONSET="$(mktemp -d)/WhisperFirst.iconset"; mkdir -p "$ICONSET"
-  for s in 16 32 128 256 512; do
-    sips -z $s $s "$ICON" --out "$ICONSET/icon_${s}x${s}.png" >/dev/null
-    sips -z $((s * 2)) $((s * 2)) "$ICON" --out "$ICONSET/icon_${s}x${s}@2x.png" >/dev/null
-  done
-  iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/WhisperFirst.icns"
+  cp Resources/AppIcon.icns Resources/MenuBarIconTemplate.png Resources/MenuBarIconTemplate@2x.png "$APP/Contents/Resources/"
   echo "$STAMP" > "$APP/Contents/Resources/.stamp"
   codesign --force --sign - --identifier com.kron.whisperfirst "$APP"
   /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$APP"
