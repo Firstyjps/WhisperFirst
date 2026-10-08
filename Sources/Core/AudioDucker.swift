@@ -40,7 +40,7 @@ final class AudioDucker {
         }
         // ปิดเสียงไม่ได้ (บางอุปกรณ์) หรือโหมดลดเสียง → ลดระดับเสียงแบบค่อยๆ
         guard let v = Self.volume(dev), v > 0.01 else { return }
-        let target = mode == .mute ? 0 : v * 0.2
+        let target = mode == .mute ? 0 : v * 0.5   // ครึ่งหนึ่ง: ยังได้ยินเพลงเบาๆ (20% ผ่าน AirPlay แทบเงียบ)
         store(Saved(uid: uid, volume: v, setVolume: target, muted: false))
         fade(dev, from: v, to: target)
         Log.write("audio: ลดเสียงลำโพง \(Int(v * 100))% → \(Int(target * 100))%")

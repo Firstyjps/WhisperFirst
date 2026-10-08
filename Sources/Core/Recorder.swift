@@ -80,7 +80,7 @@ final class Recorder {
         let input = e.inputNode
         if vp {
             // แอปอื่นเบาลงน้อยที่สุด (ค่าเริ่มต้นของระบบลดเสียงเพลงลงมาก) · AGC ของระบบช่วยไมค์เบา
-            input.voiceProcessingOtherAudioDuckingConfiguration = .init(enableAdvancedDucking: true, duckingLevel: .min)
+            input.voiceProcessingOtherAudioDuckingConfiguration = .init(enableAdvancedDucking: false, duckingLevel: .min)   // คงที่ ไม่ลดเพิ่มตอนพูด (การลดเสียงเพลงให้ AudioDucker คุมเอง)
             input.isVoiceProcessingAGCEnabled = true
         }
         let inFormat = input.outputFormat(forBus: 0)
