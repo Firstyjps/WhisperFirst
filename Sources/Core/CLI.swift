@@ -385,6 +385,17 @@ public enum WFCLI {
     static func duckTest() {
         MainActor.assumeIsolated {
             print(AudioDucker.describe())
+            if CommandLine.arguments.contains("--live") {   // ลด → คืน กับลำโพงจริง แล้วรอดูว่าค่าถูกทับไหม
+                func vol() -> String {
+                    let r = Process(); r.launchPath = "/usr/bin/osascript"; r.arguments = ["-e", "output volume of (get volume settings)"]
+                    let p = Pipe(); r.standardOutput = p; try? r.run(); r.waitUntilExit()
+                    return String(data: p.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "?"
+                }
+                func wait(_ s: Double) { RunLoop.main.run(until: Date().addingTimeInterval(s)) }
+                let d = AudioDucker()
+                print("ก่อน \(vol())"); d.duck(.lower); wait(1); print("ระหว่างพูด \(vol())")
+                d.restore(); wait(0.3); print("คืน +0.3s \(vol())"); wait(1.5); print("คืน +1.8s \(vol())"); wait(2); print("คืน +3.8s \(vol())")
+            }
             for b in ["com.google.Chrome.helper", "com.spotify.client", "com.apple.WebKit.GPU", "us.zoom.xos", "com.kron.friday"] {
                 print("  \(b): \(AudioDucker.isMedia(b) ? "เพลง/วิดีโอ → หยุดได้" : "ไม่ยุ่ง")")
             }

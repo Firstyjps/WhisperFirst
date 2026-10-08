@@ -58,6 +58,16 @@ final class AudioDucker {
             if Self.isMuted(dev) { _ = Self.setMuted(dev, false) }   // ผู้ใช้เปิดเสียงเองแล้ว → ไม่ยุ่ง
         } else if let orig = s.volume, let set = s.setVolume, let now = Self.volume(dev), wasFading || abs(now - set) < 0.02 {
             fade(dev, from: now, to: orig)   // ผู้ใช้ปรับเสียงเองระหว่างพูด → ไม่ทับ
+            // ลำโพงไร้สายบางตัว (HomePod) ส่งค่าเก่ากลับมาทับทีหลัง → ตรวจซ้ำ ยังค้างที่ระดับที่เราลดไว้ = ตั้งใหม่
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                guard let cur = Self.volume(dev), abs(cur - orig) > 0.02, cur < orig else { return }
+                if cur <= set + 0.02 || !Self.smoothFade(dev) {
+                    Self.setVolume(dev, orig)
+                    Log.write("audio: คืนเสียงซ้ำ \(Int(cur * 100))% → \(Int(orig * 100))%")
+                }
+            }
+        } else if let orig = s.volume, let set = s.setVolume, let now = Self.volume(dev) {
+            Log.write("audio: ไม่คืนเสียง — ผู้ใช้ปรับเองระหว่างพูด (\(Int(set * 100))% → \(Int(now * 100))%, เดิม \(Int(orig * 100))%)")
         }
     }
 
@@ -161,7 +171,9 @@ final class AudioDucker {
 
     /// ค่อยๆ ปรับใน ~150ms (ไม่ดังกระชาก)
     private func fade(_ dev: AudioDeviceID, from: Float32, to: Float32) {
-        ramp?.invalidate()
+        ramp?.invalidate(); ramp = nil
+        // AirPlay/Bluetooth: ตั้งทีละขั้นเร็วๆ แล้วลำโพงส่งค่าขั้นกลางกลับมาทับค่าสุดท้าย → ตั้งครั้งเดียว
+        guard Self.smoothFade(dev) else { Self.setVolume(dev, to); return }
         var step = 0
         let steps = 6
         ramp = Timer.scheduledTimer(withTimeInterval: 0.025, repeats: true) { [weak self] t in
@@ -214,6 +226,14 @@ final class AudioDucker {
         guard AudioObjectHasProperty(dev, &a), AudioObjectIsPropertySettable(dev, &a, &settable) == noErr, settable.boolValue else { return false }
         var x = max(0, min(1, v))
         return AudioObjectSetPropertyData(dev, &a, 0, nil, UInt32(MemoryLayout<Float32>.size), &x) == noErr
+    }
+
+    /// ค่อยๆ ปรับได้เฉพาะลำโพงที่ต่อตรง (ในเครื่อง/USB/ช่องหูฟัง)
+    private static func smoothFade(_ dev: AudioDeviceID) -> Bool {
+        var a = address(kAudioDevicePropertyTransportType, kAudioObjectPropertyScopeGlobal)
+        var t = UInt32(0), size = UInt32(MemoryLayout<UInt32>.size)
+        guard AudioObjectGetPropertyData(dev, &a, 0, nil, &size, &t) == noErr else { return false }
+        return t == kAudioDeviceTransportTypeBuiltIn || t == kAudioDeviceTransportTypeUSB
     }
 
     private static func canMute(_ dev: AudioDeviceID) -> Bool {
