@@ -12,6 +12,16 @@ public enum WFCLI {
         if args.count >= 2, args[1] == "shortcuts-test" { return shortcutsTest() }
         if args.count >= 2, args[1] == "snippets-test" { return snippetsTest() }
         if args.count >= 2, args[1] == "duck-test" { return duckTest() }
+        if args.count >= 3, args[1] == "local" { return localTest(Array(args.dropFirst(2))) }
+        if args.count >= 2, args[1] == "spacing-test" {
+            for t in ["โอเค ฉัน คิด ว่า ฉัน เจอ ปัญหา แล้ว เรื่อง นึง คือ ตอน ที่ ฉัน ใช้ เป็น ลำโพง ที่ เสียบ จาก HDMI หรือ DisplayPort เนี่ย",
+                      "ฉันอยากลองหลายๆ สี ในส่วนของคลื่นต่างๆ ฉันอยากให้ลองหลายๆ สี ไหนลองทำออกมาหลายๆ สีได้ไหม",
+                      "พรุ่งนี้ประชุมกับทีมตอน 10 โมงครึ่งนะ แล้วก็ฝากเตรียม slide ด้วย"] {
+                let o = Clean.overSpacedThai(t)
+                print(o ? "เว้นทุกคำ → \(Clean.joinThai(t))" : "ปกติ: \(t)")
+            }
+            return
+        }
         if args.count >= 3, args[1] == "render-shortcuts" { return renderShortcuts(args[2]) }
         if args.count >= 3, args[1] == "render-island" { return renderIsland(args[2]) }
         if args.count >= 3, args[1] == "live" { return liveTest(args[2]) }
@@ -400,6 +410,28 @@ public enum WFCLI {
                 print("  \(b): \(AudioDucker.isMedia(b) ? "เพลง/วิดีโอ → หยุดได้" : "ไม่ยุ่ง")")
             }
         }
+    }
+
+    /// ถอดในเครื่อง (Whisper) ทีละไฟล์ — ไฟล์แรกรวมเวลาโหลดโมเดล
+    static func localTest(_ files: [String]) {
+        Log.echo = true
+        print(LocalWhisper.status)
+        let sem = DispatchSemaphore(value: 0)
+        Task {
+            for f in files {
+                guard let wav = try? Data(contentsOf: URL(fileURLWithPath: f)) else { continue }
+                let pcm = wav.count > 44 ? wav.subdata(in: 44..<wav.count) : Data()
+                let input = DictationInput(wav: WAV.encode(pcm: WAV.normalized(pcm)), seconds: Double(pcm.count) / 32000, appName: "", bundleID: "")
+                let t0 = Date()
+                do {
+                    let raw = try await LocalWhisper.shared.transcribe(input)
+                    print(String(format: "%5.2fs  %@\n       → %@", Date().timeIntervalSince(t0), raw, Clean.output(LocalWhisper.polish(raw))))
+                } catch { print("error: \(error.localizedDescription)") }
+            }
+            LocalWhisper.shared.stop()
+            sem.signal()
+        }
+        while sem.wait(timeout: .now()) == .timedOut { RunLoop.main.run(until: Date().addingTimeInterval(0.05)) }
     }
 
     /// ทดสอบการขยายวลีลัด (ไม่แตะ snippets.json ของผู้ใช้)

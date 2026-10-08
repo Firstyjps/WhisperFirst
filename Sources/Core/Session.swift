@@ -110,7 +110,14 @@ final class DictationSession {
         let voiced = voicedSeconds
         defer { live?.stop(); q.async { self.early?.task.cancel() } }   // ไม่ปล่อย WebSocket/งานค้าง
 
-        guard let live else { return try await transcriber.run(input) }
+        guard let live else {
+            // ถอดในเครื่อง: Whisper แต่งประโยคเองตอนเงียบ ("ขอบคุณที่รับชม") → ไม่ได้พูดก็ไม่ต้องถอด
+            if Transcriber.useLocal, voiced < 0.3 {
+                Log.write(String(format: "ไม่มีเสียงพูด (gate %.2fs) → ไม่ถอดในเครื่อง", voiced))
+                throw NoSpeech()
+            }
+            return try await transcriber.run(input)
+        }
 
         // โหมดคำสั่ง / แม่นสุด: ส่งเสียงเสมอ แต่ยังกันกรณีไม่ได้พูดเลย
         if input.command || !Store.config.fastText {

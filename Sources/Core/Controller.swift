@@ -171,12 +171,19 @@ final class Controller {
             overlay.flash("Can't listen while a password field is active")
             return
         }
+        let local = Transcriber.useLocal
+        if command && local {
+            overlay.flash(Store.config.privateMode ? "Command mode needs the cloud — Private mode is on" : "Command mode needs the internet")
+            return
+        }
+        if local { LocalWhisper.shared.prewarm() }   // โหลดโมเดลระหว่างพูด (~2 วิ)
         let app = NSWorkspace.shared.frontmostApplication
         target = (app?.localizedName ?? "", app?.bundleIdentifier ?? "")
         let s = DictationSession(transcriber: transcriber, appName: target.name, bundleID: target.bundle)
         session = s
         // Live สร้างไว้ก่อน (เก็บเสียงช่วงแรกไว้ในบัฟเฟอร์) แต่เชื่อมต่อจริงตอน commit
-        let lv: LiveTranscriber? = Store.config.liveTranscript && Keys.gemini != nil ? LiveTranscriber() : nil
+        // Private mode / ออฟไลน์ → ไม่ส่งเสียงไปถอดสด (Live เป็น cloud)
+        let lv: LiveTranscriber? = Store.config.liveTranscript && Keys.gemini != nil && !local ? LiveTranscriber() : nil
         let display = LiveDisplay()
         lv?.onText = { [weak self] stable, pending in
             let (a, b) = display.clean(stable: stable, pending: pending)
@@ -211,6 +218,7 @@ final class Controller {
         committed = true
         learner.flush()   // พูดรอบใหม่ = ผู้ใช้แก้ข้อความรอบก่อนเสร็จแล้ว
         overlay.listening(command: commandMode, icon: app?.icon)
+        overlay.onDevice = Transcriber.useLocal
         if handsFree { overlay.handsFree = true }
         s.ignoreNext(seconds: 0.3)   // เสียง Tink ของเราเองเข้าไมค์ → ไม่นับว่าเป็นเสียงพูด
         live?.muteNext(seconds: 0.3)   // …และไม่ส่งให้ Live ฟัง (คำแรกเพี้ยน)
@@ -225,7 +233,7 @@ final class Controller {
             duckWork = w
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: w)
         }
-        transcriber.prewarm()
+        if !Transcriber.useLocal { transcriber.prewarm() }
         if let key = Keys.gemini { live?.start(key: key) }
         // อ่านข้อความก่อนเคอร์เซอร์นอก main (AX อาจค้างได้ถึงวินาที) · ไม่อ่านใน terminal/ตัวจัดการรหัสผ่าน
         let pid = app?.processIdentifier

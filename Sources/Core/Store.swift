@@ -95,6 +95,12 @@ struct Config: Codable {
     var noiseReduction = true
     /// ระหว่างพูด: ลดเสียง/ปิดเสียงลำโพง (เพลง วิดีโอ) แล้วคืนค่าเดิมตอนปล่อยปุ่ม · ลำโพงที่ปรับเสียงไม่ได้ → หยุดเพลงแทน
     var muteWhileTalking: AudioDucker.Mode = .lower
+    /// Private mode: ถอดเสียงในเครื่องเท่านั้น (Whisper) ไม่ส่งเสียง/ข้อความขึ้น cloud เลย
+    var privateMode = false
+    /// เน็ตหลุด/cloud ล่ม → ถอดในเครื่องแทน
+    var offlineFallback = true
+    /// path โมเดล Whisper (ggml) — nil = หาเอง
+    var offlineModel: String? = nil
     /// เก็บประวัติในเครื่อง · จำนวนวัน (0 = ตลอดไป)
     var keepHistory = true
     var historyDays = 30
@@ -130,6 +136,9 @@ struct Config: Codable {
         restoreClipboard = v(.restoreClipboard, d.restoreClipboard)
         noiseReduction = v(.noiseReduction, d.noiseReduction)
         muteWhileTalking = v(.muteWhileTalking, d.muteWhileTalking)
+        privateMode = v(.privateMode, d.privateMode)
+        offlineFallback = v(.offlineFallback, d.offlineFallback)
+        offlineModel = v(.offlineModel, d.offlineModel)
         keepHistory = v(.keepHistory, d.keepHistory)
         historyDays = v(.historyDays, d.historyDays)
         useSystemElevenLabsKey = v(.useSystemElevenLabsKey, d.useSystemElevenLabsKey)

@@ -14,6 +14,8 @@ final class OverlayModel: ObservableObject {
     let meter = LevelMeter()
     @Published var command = false
     @Published var handsFree = false
+    /// ถอดในเครื่อง (Private mode/ออฟไลน์) — โชว์ป้าย
+    @Published var onDevice = false
     @Published var message = ""
     /// ข้อความสดทั้งหมด (ใช้คำนวณขนาดเกาะ) · ส่วนท้ายที่ยังเดาอยู่ (โชว์จางกว่า)
     @Published var liveText = ""
@@ -216,6 +218,7 @@ struct IslandView: View {
                         .frame(maxWidth: .infinity)
                     if m.command { badge("Command", .orange) }
                     if m.handsFree { badge("Hands-free", .blue) }
+                    if m.onDevice { badge("On-device", .green) }
                     TimelineView(.periodic(from: m.startedAt, by: 1)) { ctx in
                         Text(clock(ctx.date.timeIntervalSince(m.startedAt)))
                             .font(.system(size: 12, weight: .medium, design: .monospaced)).foregroundStyle(.white.opacity(0.6))

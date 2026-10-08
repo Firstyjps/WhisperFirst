@@ -33,6 +33,10 @@ final class SettingsModel: ObservableObject {
     @Published var restoreClipboard = Store.config.restoreClipboard { didSet { Store.update { $0.restoreClipboard = restoreClipboard } } }
     @Published var noiseReduction = Store.config.noiseReduction { didSet { Store.update { $0.noiseReduction = noiseReduction } } }
     @Published var muteWhileTalking = Store.config.muteWhileTalking { didSet { Store.update { $0.muteWhileTalking = muteWhileTalking } } }
+    @Published var privateMode = Store.config.privateMode {
+        didSet { Store.update { $0.privateMode = privateMode }; if privateMode { LocalWhisper.shared.prewarm() } }
+    }
+    @Published var offlineFallback = Store.config.offlineFallback { didSet { Store.update { $0.offlineFallback = offlineFallback } } }
     @Published var elevenLabsFallback = Store.config.elevenLabsFallback { didSet { Store.update { $0.elevenLabsFallback = elevenLabsFallback } } }
     /// เปิดตอนเข้าสู่ระบบ (SMAppService — ตัวเดียวกับในเมนู)
     @Published var loginItem = SMAppService.mainApp.status == .enabled {
@@ -315,10 +319,25 @@ struct SettingsPage: View {
         section("Privacy") {
             VStack(alignment: .leading, spacing: 6) {
                 Text("What leaves your Mac").font(.system(size: 14, weight: .semibold))
-                Text("Only while you hold the key: your voice goes to Google Gemini to become text. With “Look at nearby text”, a few lines before your cursor go too (never from password fields, terminals or password managers). “Learn from my corrections” sends the phrase you fixed. The backup engine (ElevenLabs) is used only if Gemini is down.")
+                Text("Only while you hold the key: your voice goes to Google Gemini to become text. With “Look at nearby text”, a few lines before your cursor go too (never from password fields, terminals or password managers). “Learn from my corrections” sends the phrase you fixed. The backup engine (ElevenLabs) is used only if Gemini is down. With Private mode on, nothing is sent — Whisper runs on this Mac.")
                     .font(.system(size: 12.5)).foregroundStyle(Theme.muted).lineSpacing(3).fixedSize(horizontal: false, vertical: true)
             }
             .padding(.horizontal, 20).padding(.vertical, 14)
+            divider
+            row("Private mode", "Transcribe on this Mac only — nothing leaves it · slower, less polished · no Command mode") {
+                toggle("Private mode", $s.privateMode)
+            }
+            .opacity(LocalWhisper.available ? 1 : 0.45).disabled(!LocalWhisper.available && !s.privateMode)
+            divider
+            row("Work offline", "No internet or the cloud is down → transcribe on this Mac") { toggle("Work offline", $s.offlineFallback) }
+            .opacity(LocalWhisper.available ? 1 : 0.45).disabled(!LocalWhisper.available)
+            HStack(spacing: 6) {
+                Image(systemName: LocalWhisper.available ? "checkmark.circle.fill" : "exclamationmark.circle").font(.system(size: 11.5))
+                    .foregroundStyle(LocalWhisper.available ? Theme.successText : Theme.accentText)
+                Text(LocalWhisper.status).font(.system(size: 12)).foregroundStyle(Theme.muted2)
+                Spacer()
+            }
+            .padding(.horizontal, 20).padding(.bottom, 12)
             divider
             row("Keep a history on this Mac", "Shown in History · never uploaded") { toggle("Keep a history on this Mac", $s.keepHistory) }
             divider

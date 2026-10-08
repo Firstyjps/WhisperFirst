@@ -183,6 +183,7 @@ final class Learner {
         timer = nil
         guard let w = watch else { return }
         watch = nil
+        guard !Store.config.privateMode else { return }   // การตัดสินคำใช้ Gemini → Private mode ไม่ส่ง
         guard w.current != w.inserted else { return }
         // ลบทั้งช่อง (เช่นกดส่งข้อความแล้วช่องว่าง) / เขียนใหม่เกือบหมด → ไม่ใช่การแก้คำ
         let cur = w.current.trimmingCharacters(in: .whitespacesAndNewlines)

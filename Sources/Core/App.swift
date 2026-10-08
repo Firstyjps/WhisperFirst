@@ -183,7 +183,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     }
 
     /// ปิดแอประหว่างพูด → คืนเสียงลำโพงก่อน
-    func applicationWillTerminate(_ n: Notification) { controller.restoreAudio() }
+    func applicationWillTerminate(_ n: Notification) {
+        controller.restoreAudio()
+        LocalWhisper.shared.stop()   // ไม่ทิ้งโมเดล ~3 GB ค้างใน RAM
+    }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         showHub()

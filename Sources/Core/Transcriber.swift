@@ -112,6 +112,21 @@ enum Clean {
         return t
     }
 
+    /// โมเดลบางทีเว้นวรรคทุกคำไทย ("ฉัน คิด ว่า ฉัน เจอ") — คำไทยยาวเฉลี่ยไม่ถึง 5 ตัว และเกือบทุกช่วงคั่นด้วยวรรค (ปกติยาว 13+)
+    static func overSpacedThai(_ s: String) -> Bool {
+        let runs = s.split { c in !(c.unicodeScalars.first.map { (0x0E00...0x0E7F).contains($0.value) } ?? false) }
+        guard runs.count >= 8 else { return false }
+        let avg = Double(runs.reduce(0) { $0 + $1.count }) / Double(runs.count)
+        let gaps = (try? NSRegularExpression(pattern: "[\\u0E00-\\u0E7F] (?=[\\u0E00-\\u0E7F])"))?
+            .numberOfMatches(in: s, range: NSRange(location: 0, length: (s as NSString).length)) ?? 0
+        return avg < 5 && Double(gaps) > Double(runs.count) * 0.7
+    }
+
+    /// ทางสุดท้าย: ลบวรรคระหว่างอักษรไทยกับอักษรไทย (วรรครอบคำอังกฤษ/ตัวเลขคงไว้)
+    static func joinThai(_ s: String) -> String {
+        s.replacingOccurrences(of: "(?<=[\\u0E00-\\u0E7F]) (?=[\\u0E00-\\u0E7F])", with: "", options: .regularExpression)
+    }
+
     /// แทนคำ + เว้นวรรคแบบไทยรอบคำอังกฤษ ("ให้คอร์สโค้ดทำ" → "ให้ Claude Code ทำ")
     static func replace(_ text: String, _ from: String, _ to: String, caseInsensitive: Bool = false) -> String {
         guard !from.isEmpty, let first = to.first, let last = to.last else { return text }
@@ -175,12 +190,28 @@ final class Transcriber {
         var errors: [String] = []
         let models = models ?? cfg.models
 
+        // Private mode / ออฟไลน์ → ถอดในเครื่องเลย (ไม่ต้องรอ cloud timeout)
+        if input.transcript == nil, Self.useLocal {
+            guard !input.command else { throw WFError(cfg.privateMode ? "Command mode needs the cloud — turn off Private mode" : "Command mode needs the internet") }
+            return try await local(input, t0)
+        }
+        guard input.transcript == nil || Net.shared.isOnline else { throw WFError("ออฟไลน์") }
+
         if let key = Keys.gemini, !models.isEmpty {
             switch await hedged(models: models, key: key, system: system, input: input) {
             case .ok(let model, let text):
                 let ms = Int(Date().timeIntervalSince(t0) * 1000)
                 Log.write("ok \(model) \(ms)ms audio=\(String(format: "%.1f", input.seconds))s")
-                return DictationResult(text: Clean.output(text), model: model, ms: ms)
+                var out = Clean.output(text)
+                if input.transcript == nil, !input.command, Clean.overSpacedThai(out) {
+                    // เกลาซ้ำแบบข้อความ (prompt มีกฎเว้นวรรคไทย) · ยังไม่หาย → รวมคำไทยเอง
+                    var ti = input
+                    ti.transcript = out
+                    ti.before = nil
+                    if let r = try? await run(ti, fallback: false), !Clean.overSpacedThai(r.text) { out = r.text } else { out = Clean.joinThai(out) }
+                    Log.write("ผลเว้นวรรคทุกคำ → แก้แล้ว")
+                }
+                return DictationResult(text: out, model: model, ms: Int(Date().timeIntervalSince(t0) * 1000))
             case .fail(_, let e):
                 errors.append(e)
             default:
@@ -191,7 +222,7 @@ final class Transcriber {
         }
         try Task.checkCancellation()
 
-        if fallback, input.transcript == nil, cfg.elevenLabsFallback, !input.command, let key = Keys.elevenLabs {
+        if fallback, input.transcript == nil, cfg.elevenLabsFallback, !input.command, Net.shared.isOnline, let key = Keys.elevenLabs {
             try Task.checkCancellation()
             do {
                 let raw = try await elevenLabs(key: key, input: input)
@@ -202,8 +233,28 @@ final class Transcriber {
                 errors.append("ElevenLabs: \(error.localizedDescription)")
             }
         }
+        // cloud ล่มหมด → ถอดในเครื่อง
+        if fallback, input.transcript == nil, !input.command, cfg.offlineFallback, LocalWhisper.available {
+            Log.write("cloud ใช้ไม่ได้ → ถอดในเครื่อง")
+            if let r = try? await local(input, t0) { return r }
+        }
         throw WFError(errors.joined(separator: "\n"))
     }
+
+    /// ใช้ถอดในเครื่องแทน cloud ตอนนี้ไหม (Private mode หรือออฟไลน์)
+    static var useLocal: Bool {
+        let c = Store.config
+        return c.privateMode || (!Net.shared.isOnline && c.offlineFallback && LocalWhisper.available)
+    }
+
+    private func local(_ input: DictationInput, _ t0: Date) async throws -> DictationResult {
+        let raw = try await LocalWhisper.shared.transcribe(input)
+        try Task.checkCancellation()
+        let ms = Int(Date().timeIntervalSince(t0) * 1000)
+        Log.write("ok whisper-local \(ms)ms audio=\(String(format: "%.1f", input.seconds))s")
+        return DictationResult(text: Clean.output(LocalWhisper.polish(raw)), model: "whisper-local", ms: ms)
+    }
+
 
     // MARK: Gemini
 
