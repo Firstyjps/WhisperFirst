@@ -1,21 +1,23 @@
 #!/bin/zsh
-# build WhisperFirst → libWhisperFirstCore.dylib (โค้ดจริง) + WhisperFirst.app (ตัวเปิด)
-# - dylib + prompts ไปที่ ~/Library/Application Support/WhisperFirst/ ทุกครั้ง
-# - WhisperFirst.app ติดตั้งใหม่เฉพาะเมื่อ Launcher/Info.plist/ไอคอนเปลี่ยน → ปกติ build ใหม่ไม่ต้องให้สิทธิ์ซ้ำ
+# build WhisperFirst → ~/Applications/WhisperFirst.app (โค้ดทั้งหมดในไฟล์เดียว) + prompts ใน Application Support
+# - sign ด้วยใบรับรองในเครื่อง "WhisperFirst Local Signing" + hardened runtime
+#   → macOS ผูกสิทธิ์ไมค์/Accessibility กับใบรับรอง: build ใหม่ไม่ต้องให้สิทธิ์ซ้ำ และแอปที่ถูกแก้/sign ด้วยอย่างอื่นจะไม่ได้สิทธิ์
+# - ไม่มีใบรับรอง → สร้างให้อัตโนมัติ (scripts/make-signing-cert.sh) · ใช้ใบอื่น: WF_SIGN_ID="ชื่อ" ./build.sh
 set -euo pipefail
 cd "${0:A:h}"
 APP="$HOME/Applications/WhisperFirst.app"
 SUPPORT="$HOME/Library/Application Support/WhisperFirst"
+SIGN_ID="${WF_SIGN_ID:-WhisperFirst Local Signing}"
+
+security find-certificate -c "$SIGN_ID" >/dev/null 2>&1 || ./scripts/make-signing-cert.sh "$SIGN_ID"
 
 swift build -c release
 BIN_DIR="$(swift build -c release --show-bin-path)"
 
-# 1) โค้ดจริง → แทนที่แบบ atomic
+# 1) prompts → Application Support · ลบ dylib รุ่นเก่า (เคยโหลดจากที่นี่ — ตอนนี้ไม่ใช้แล้ว)
 mkdir -p "$SUPPORT/prompts"
-cp "$BIN_DIR/libWhisperFirstCore.dylib" "$SUPPORT/.libWhisperFirstCore.new"
-codesign --force --sign - "$SUPPORT/.libWhisperFirstCore.new" 2>/dev/null
-mv -f "$SUPPORT/.libWhisperFirstCore.new" "$SUPPORT/libWhisperFirstCore.dylib"
 cp prompts/*.md "$SUPPORT/prompts/"
+rm -f "$SUPPORT/libWhisperFirstCore.dylib" "$SUPPORT/.libWhisperFirstCore.new"
 
 # 2) ไฟล์ของผู้ใช้ — สร้างครั้งแรกเท่านั้น ไม่ทับของเดิม
 [[ -f "$SUPPORT/dictionary.txt" ]] || cp defaults/dictionary.txt "$SUPPORT/dictionary.txt"
@@ -28,21 +30,20 @@ if [[ ! -f "$SUPPORT/.env" ]]; then
   chmod 600 "$SUPPORT/.env"
 fi
 
-# 3) ตัวแอป — เฉพาะเมื่อเปลี่ยน
+# 3) ตัวแอป — ประกอบในที่ชั่วคราว sign + ตรวจ แล้วค่อยสลับเข้าที่ (ล้มกลางทางไม่ทำแอปเดิมเสีย)
 # โลโก้ (7b "Echo") อยู่ใน Resources/ — AppIcon.icns + ไอคอน menu bar (template PNG)
-STAMP=$(cat "$BIN_DIR/WhisperFirst" Info.plist Resources/AppIcon.icns Resources/MenuBarIconTemplate*.png | shasum -a 256 | cut -c1-16)
-if [[ "$(cat "$APP/Contents/Resources/.stamp" 2>/dev/null)" != "$STAMP" ]]; then
-  echo "⚠️  ตัวแอปเปลี่ยน → ติดตั้งใหม่ (อาจต้องให้สิทธิ์ไมค์/Accessibility อีกครั้ง)"
-  pkill -x WhisperFirst 2>/dev/null || true
-  rm -rf "$APP"
-  mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-  cp "$BIN_DIR/WhisperFirst" "$APP/Contents/MacOS/WhisperFirst"
-  cp Info.plist "$APP/Contents/Info.plist"
-  cp Resources/AppIcon.icns Resources/MenuBarIconTemplate.png Resources/MenuBarIconTemplate@2x.png "$APP/Contents/Resources/"
-  echo "$STAMP" > "$APP/Contents/Resources/.stamp"
-  codesign --force --sign - --identifier com.kron.whisperfirst "$APP"
-  /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$APP"
-fi
+NEW="$HOME/Applications/.WhisperFirst.new.app"
+rm -rf "$NEW"
+mkdir -p "$NEW/Contents/MacOS" "$NEW/Contents/Resources"
+cp "$BIN_DIR/WhisperFirst" "$NEW/Contents/MacOS/WhisperFirst"
+cp Info.plist "$NEW/Contents/Info.plist"
+cp Resources/AppIcon.icns Resources/MenuBarIconTemplate.png Resources/MenuBarIconTemplate@2x.png "$NEW/Contents/Resources/"
+codesign --force --sign "$SIGN_ID" --identifier com.kron.whisperfirst --options runtime \
+  --entitlements WhisperFirst.entitlements --timestamp=none "$NEW"
+codesign --verify --strict "$NEW"
+rm -rf "$APP"
+mv "$NEW" "$APP"
+/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$APP"
 
 # 4) รีสตาร์ทแอปให้ใช้โค้ดใหม่
 if pgrep -x WhisperFirst >/dev/null; then

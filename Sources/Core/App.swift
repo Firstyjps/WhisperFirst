@@ -188,8 +188,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     }
 }
 
-/// จุดเข้าของ dylib — Launcher (ตัวแอป) โหลด dylib นี้แล้วเรียกฟังก์ชันนี้
-@_cdecl("whisperfirst_main")
+/// จุดเข้าของแอป — Sources/Launcher เรียกฟังก์ชันนี้
 public func whisperfirstMain() {
     MainActor.assumeIsolated {
         let app = NSApplication.shared

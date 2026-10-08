@@ -62,7 +62,9 @@ Wispr Flow เร็วเพราะส่งเสียงไปประม
 ผลทดสอบ 8 ประโยค (`bench/`): flash-lite one-shot ~98% / 2.1 วิ · ElevenLabs+Gemini 2 ขั้น 4–5 วิ · Whisper large-v3 ในเครื่อง 12–23 วิ และสะกดชื่อผิด
 
 ## ไฟล์
-- โค้ด: `Sources/Core/*` (dylib) · `Sources/Launcher` (ตัวแอป — แทบไม่เปลี่ยน → build ใหม่ไม่ต้องให้สิทธิ์ซ้ำ)
+- โค้ด: `Sources/Core/*` (ลิงก์ static เข้าตัวแอป) · `Sources/Launcher` (จุดเข้า) — ทั้งแอปเป็นไฟล์เดียว ไม่โหลด dylib จากภายนอก
+- การ sign: `./build.sh` sign ด้วยใบรับรอง self-signed ในเครื่อง "WhisperFirst Local Signing" (สร้างให้อัตโนมัติครั้งแรกผ่าน `scripts/make-signing-cert.sh`) + hardened runtime (`WhisperFirst.entitlements` = ไมค์อย่างเดียว) → macOS ผูกสิทธิ์ไมค์/Accessibility กับใบรับรอง: build ใหม่ไม่ต้องให้สิทธิ์ซ้ำ · แอปที่ถูกแก้หรือ sign ด้วยอย่างอื่นไม่ได้สิทธิ์ · DYLD injection ถูกบล็อก
+- ย้ายมาจากเวอร์ชัน dylib เดิม: ต้องให้สิทธิ์ Accessibility ใหม่ 1 ครั้ง (ลบรายการเก่าใน System Settings → เปิดแอป → เปิดสวิตช์)
 - ข้อมูล: `~/Library/Application Support/WhisperFirst/` → `.env` (API keys), `config.json`, `dictionary.txt`, `about-me.md`, `prompts/`, `history.jsonl`
 - log: `~/Library/Logs/WhisperFirst/whisperfirst.log` (อ่านได้เฉพาะผู้ใช้ · หมุนไฟล์ที่ 2 MB · ไม่บันทึกข้อความที่พูด)
 
