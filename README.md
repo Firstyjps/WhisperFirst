@@ -106,7 +106,7 @@ Wispr Flow เร็วเพราะส่งเสียงไปประม
 .build/release/wf stream bench/samples/vocab.wav --gap 0.6 [--nospec]   # จำลองพูดตามเวลาจริง วัดเวลาหลังปล่อยปุ่ม
 .build/release/wf learn "ข้อความที่วาง" "ข้อความหลังแก้"   # ทดสอบ diff + การตัดสินคำ
 .build/release/wf learn-e2e                   # ทั้งวงจรกับ TextEdit เบื้องหลัง (ต้องมีสิทธิ์ Accessibility)
-.build/release/wf shortcuts-test              # ป้อน key event จำลองเข้า engine ปุ่มลัด (21 กรณี)
+.build/release/wf shortcuts-test              # ป้อน key event จำลองเข้า engine ปุ่มลัด (25 กรณี รวมปุ่มเมาส์ข้าง)
 .build/release/wf snippets-test               # ทดสอบการขยายวลีลัด (10 กรณี ไม่แตะไฟล์ของผู้ใช้)
 .build/release/wf render-shortcuts out.png    # เรนเดอร์หน้าปุ่มลัดเป็นภาพ
 python3 bench/run.py gemini:gemini-3.1-flash-lite elevenlabs   # เทียบเครื่องยนต์ (ต้องมี GEMINI_API_KEY)

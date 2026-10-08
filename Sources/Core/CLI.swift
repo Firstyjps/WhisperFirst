@@ -260,6 +260,16 @@ public enum WFCLI {
         feed([roptDown, key(49, true), key(49, false), roptUp])
         check("⌥ขวา + space → ยกเลิกกดค้าง แล้วเปิดแฮนด์ฟรี", ["pushToTalk.down", "pushToTalk.cancel", "handsFree.down"], [false, true, true, false])
 
+        // --- ปุ่มเมาส์ข้าง (Mouse 4 = m:3, Mouse 5 = m:4) ---
+        e.bindings = [.pushToTalk: [["m:3"]], .handsFree: [["m:4"]]]
+        feed([mouse(3, true), mouse(3, false)])
+        check("Mouse 4 กดค้าง → พูด, ปล่อย → จบ (ไม่ย้อนหน้าเว็บ)", ["pushToTalk.down", "pushToTalk.up"], [true, true])
+        feed([mouse(4, true), mouse(4, false)])
+        check("Mouse 5 แตะ → แฮนด์ฟรี (ไม่ไปหน้าถัดไป)", ["handsFree.down"], [true, true])
+        e.bindings = [.pushToTalk: [["ropt"]]]
+        feed([mouse(3, true), mouse(3, false), mouse(4, true), mouse(4, false)])
+        check("Mouse 4/5 ที่ไม่ได้ตั้ง → ผ่านไปแอป (ย้อนหน้า/ถัดไปได้ปกติ)", [], [false, false, false, false])
+
         // --- เคสจากออดิท ---
         e.onEscape = { log.append("escape") }
         e.bindings = [.pushToTalk: [["ropt"]], .pasteLast: [["ctrl", "opt", "k:9"]]]
@@ -294,6 +304,12 @@ public enum WFCLI {
         settle()
         let ok2 = got.last?.0 == ["ctrl", "opt", "k:9"]
         print("\(ok2 ? "✅" : "❌") อัดปุ่ม ⌃⌥V ฝั่งซ้าย → \(got.last.map { "\($0.0)" } ?? "-") (ข้างไหนก็ได้)"); if !ok2 { fails += 1 }
+        got = []; swallowed = []
+        e.beginRecording { c, d in got.append((c, d)) }
+        feed([mouse(3, true), mouse(3, false)])
+        settle()
+        let okM = got.last?.1 == true && got.last?.0 == ["m:3"] && swallowed == [true, true]
+        print("\(okM ? "✅" : "❌") อัดปุ่ม Mouse 4 → \(got.last.map { Keys2.label($0.0) } ?? "-") · กลืนระหว่างอัด=\(swallowed)"); if !okM { fails += 1 }
         got = []; swallowed = []
         e.beginRecording { c, d in got.append((c, d)) }
         feed([roptDown, roptUp])

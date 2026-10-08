@@ -165,6 +165,7 @@ struct ShortcutsTab: View {
             .wfCard(18)
             VStack(alignment: .leading, spacing: 6) {
                 (Text("Press ") + Text("Esc").bold() + Text(" while talking to cancel."))
+                (Text("Mouse side buttons work too — click a shortcut, then press ") + Text("Mouse 4").bold() + Text(" or ") + Text("Mouse 5").bold() + Text(". No Razer Synapse needed; if it remapped them to keys, those keys get recorded instead."))
                 (Text("Want to use the ") + Text("fn / globe").bold() + Text(" key? In System Settings → Keyboard, set “Press globe key to” → Do Nothing."))
             }
             .font(.system(size: 12.5)).foregroundStyle(Theme.muted).padding(.leading, 4)
@@ -232,7 +233,7 @@ private struct ComboField: View {
         let rec = m.recording == ShortcutsModel.Slot(action: action, index: index)
         HStack(spacing: 6) {
             if rec && m.live.isEmpty {
-                Text("Press keys…").font(.system(size: 13)).foregroundStyle(Theme.accentText)
+                Text("Press keys or a mouse button…").font(.system(size: 13)).foregroundStyle(Theme.accentText)
             } else {
                 Keycaps(combo: rec ? m.live : combo)
             }
@@ -256,7 +257,7 @@ private struct ComboField: View {
         .onHover { hover.on = $0 }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(action.title) shortcut: \(combo.isEmpty ? "not set" : ShortcutsModel.display(combo))")
-        .accessibilityHint(rec ? "Press the keys you want" : "Activate to change")
+        .accessibilityHint(rec ? "Press the keys or mouse button you want" : "Activate to change")
         .accessibilityAddTraits(.isButton)
         .accessibilityAction { if !rec { m.startRecording(action, index: index) } }
     }
