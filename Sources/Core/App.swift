@@ -25,6 +25,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         controller.onStateChange = { [weak self] in self?.updateIcon() }
         controller.start()
 
+        DispatchQueue.global(qos: .utility).async { History.prune() }   // ลบประวัติเกินระยะที่ตั้งไว้
         AVCaptureDevice.requestAccess(for: .audio) { ok in if !ok { Log.write("ไม่ได้สิทธิ์ไมค์") } }
         wasTrusted = AX.trusted
         if !wasTrusted { AX.prompt() }
@@ -36,6 +37,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                 if now != self.wasTrusted {
                     self.wasTrusted = now
                     if now { self.controller.shortcuts.start(); self.controller.overlay.flash("Ready — hold \(Store.config.pushToTalkLabel) and speak", seconds: 3) }
+                    else {
+                        self.controller.shortcuts.stop()
+                        if self.controller.state == .recording { self.controller.cancel(silent: false) }   // ปล่อยปุ่มไม่ถูกตรวจจับแล้ว → อย่าให้ไมค์ค้าง
+                        Log.write("สิทธิ์ Accessibility หลุด → หยุดดักปุ่ม") }   // ไม่ค้าง tap ที่ใช้ไม่ได้
                     self.updateIcon()
                 }
             }
@@ -159,8 +164,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         hubWindow?.makeKeyAndOrderFront(nil)
     }
 
+    func windowDidResignKey(_ n: Notification) {
+        if (n.object as? NSWindow) === hubWindow { hub?.settings.shortcuts.cancelRecording() }
+    }
+
     func windowWillClose(_ n: Notification) {
         guard (n.object as? NSWindow) === hubWindow else { return }
+        hub?.settings.shortcuts.cancelRecording()
         DispatchQueue.main.async { NSApp.setActivationPolicy(.accessory) }
     }
 

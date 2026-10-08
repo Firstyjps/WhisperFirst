@@ -6,6 +6,8 @@ final class LiveTranscriber: NSObject {
     static let model = "gemini-3.5-transcribe-live"
     /// ข้อความสะสมทั้งหมดจนถึงตอนนี้ — เรียกบน main thread
     var onText: ((String) -> Void)?
+    /// ทุกช่วงได้ฉบับสุดท้ายแล้วระหว่างที่ยังกดค้าง (ผู้ใช้หยุดพูด) → (ข้อความ, จำนวนช่วง, วินาทีที่พูดจริง) — เรียกบน q
+    var onSettled: ((String, Int, Double?) -> Void)?
 
     private var task: URLSessionWebSocketTask?
     private let q = DispatchQueue(label: "wf.live")
@@ -28,11 +30,18 @@ final class LiveTranscriber: NSObject {
     private var full: String { (committed + (interim.isEmpty ? [] : [interim])).joined(separator: " ") }
     private var waiter: CheckedContinuation<String?, Never>?
     private(set) var failed = false
+    /// เวลาในเสียง (วินาที) ที่เริ่มพูดช่วงแรก / จบช่วงล่าสุด — จาก voiceActivity.audioOffset
+    private var firstStart: Double?
+    private var lastEnd: Double?
+    /// ความยาวที่ "พูดจริง" (ไม่นับเงียบหัว/ท้าย) — nil ถ้ายังไม่รู้
+    var spokenSeconds: Double? { q.sync { firstStart.flatMap { s in lastEnd.map { max(0, $0 - s) } } } }
+    var hasFailed: Bool { q.sync { failed } }
 
     func start(key: String) {
-        var c = URLComponents(string: "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent")!
-        c.queryItems = [URLQueryItem(name: "key", value: key)]
-        let t = URLSession.shared.webSocketTask(with: c.url!)
+        // key ใน header (ไม่อยู่ใน URL → ไม่หลุดไปกับ proxy log / error message)
+        var req = URLRequest(url: URL(string: "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent")!)
+        req.setValue(key, forHTTPHeaderField: "x-goog-api-key")
+        let t = URLSession.shared.webSocketTask(with: req)
         task = t
         t.resume()
         send(["setup": ["model": "models/\(Self.model)",
@@ -68,6 +77,13 @@ final class LiveTranscriber: NSObject {
         return out
     }
 
+    /// ระหว่างยังกดค้าง: ทุกช่วงได้ฉบับสุดท้าย + ไม่ได้พูดอยู่ → บอก session ให้เกลาล่วงหน้าได้
+    private func notifySettled() {
+        guard !finished, !endSent, allFinal, !inSegment, segmentsStarted > 0 else { return }
+        let spoken = firstStart.flatMap { s in lastEnd.map { max(0, $0 - s) } }
+        onSettled?(committed.joined(separator: " "), segmentsStarted, spoken)
+    }
+
     private func resolveIfDone() {
         guard endSent, allFinal, !inSegment, let w = waiter else { return }
         waiter = nil
@@ -85,10 +101,15 @@ final class LiveTranscriber: NSObject {
     }
 
     /// จบการพูดแล้วรอข้อความฉบับสุดท้าย (ปกติ ~0.3 วิ) · หมดเวลา → nil (ให้ไปใช้ทางส่งเสียงแทน)
-    func finish(timeout: Double = 1.5) async -> String? {
+    func finish(timeout: Double = 0.8) async -> String? {
         await withCheckedContinuation { (c: CheckedContinuation<String?, Never>) in
             q.async {
-                if self.failed || !self.ready { c.resume(returning: nil); return }
+                if self.failed || !self.ready {
+                    // ยังไม่ต่อสำเร็จ/ล่ม → ปิดให้เรียบร้อย (ไม่ปล่อย socket ค้าง)
+                    self.finished = true
+                    self.q.asyncAfter(deadline: .now() + 0.5) { self.close() }
+                    c.resume(returning: nil); return
+                }
                 self.flush()
                 self.finished = true
                 if !self.endSent { self.endSent = true; self.send(["realtimeInput": ["audioStreamEnd": true]]) }
@@ -169,10 +190,16 @@ final class LiveTranscriber: NSObject {
         }
         if let err = json["error"] { Log.write("live: error \(err)") }
         if let va = (json["voiceActivity"] as? [String: Any])?["type"] as? String {
+            let offset = ((json["voiceActivity"] as? [String: Any])?["audioOffset"] as? String)
+                .flatMap { Double($0.trimmingCharacters(in: CharacterSet(charactersIn: "s"))) }
             q.async {
-                if va == "ACTIVITY_START" { self.inSegment = true; self.segmentsStarted += 1 }
-                if va == "ACTIVITY_END" { self.inSegment = false }
+                if va == "ACTIVITY_START" {
+                    self.inSegment = true; self.segmentsStarted += 1
+                    if self.firstStart == nil { self.firstStart = offset }
+                }
+                if va == "ACTIVITY_END" { self.inSegment = false; if let offset { self.lastEnd = offset } }
                 self.resolveIfDone()
+                self.notifySettled()
             }
         }
         guard let sc = json["serverContent"] as? [String: Any] else { return }
@@ -187,6 +214,7 @@ final class LiveTranscriber: NSObject {
                 self.finalsReceived += 1
                 self.interim = ""
                 self.resolveIfDone()
+                self.notifySettled()
             } else if let t = interimText, !isForeign(t) {
                 self.interim = t
             }

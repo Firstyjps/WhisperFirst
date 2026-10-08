@@ -51,10 +51,10 @@ public enum WFCLI {
         guard let wav = try? Data(contentsOf: URL(fileURLWithPath: args[2])), wav.count > 44 else { print("อ่านไฟล์ไม่ได้"); exit(1) }
         let pcm = wav.subdata(in: 44..<wav.count)
         let s = DictationSession(transcriber: Transcriber(), appName: opt(args, "--app") ?? "Notes", bundleID: "com.apple.Notes")
-        s.speculate = args.contains("--spec")
         let gain = Double(opt(args, "--gain") ?? "1") ?? 1   // จำลองไมค์เบา เช่น 0.12
         if args.contains("--live"), let key = Keys.gemini {
             let l = LiveTranscriber()
+            l.onSettled = { [weak s] text, segs, spoken in s?.liveSettled(text: text, segments: segs, spoken: spoken) }
             l.start(key: key)
             s.live = l
         }
@@ -84,7 +84,7 @@ public enum WFCLI {
             let released = Date()
             do {
                 let r = try await s.finish()
-                print("[\(r.model) หลังปล่อย \(Int(Date().timeIntervalSince(released) * 1000))ms\(s.usedText ? " ข้อความLive" : s.usedSpeculative ? " ล่วงหน้า" : " ส่งเสียง")]")
+                print("[\(r.model) หลังปล่อย \(Int(Date().timeIntervalSince(released) * 1000))ms\(s.usedEarly ? " เกลาล่วงหน้า" : s.usedText ? " ข้อความLive" : " ส่งเสียง")]")
                 print(r.text)
             } catch { print("ERROR: \(error.localizedDescription)") }
             sem.signal()
@@ -101,7 +101,7 @@ public enum WFCLI {
         Task { @MainActor in
             let l = Learner(transcriber: Transcriber())
             for h in hunks {
-                if let d = await l.judge(h, sentence: args[3]) { print("  \(h.old) → \(h.new): learn=\(d.learn) word=\(d.word) heard=\(d.heard)") }
+                if let d = await l.judge(h, context: Learner.context(of: h.new, in: args[3])) { print("  \(h.old) → \(h.new): learn=\(d.learn) word=\(d.word) heard=\(d.heard)") }
             }
             sem.signal()
         }
@@ -248,6 +248,27 @@ public enum WFCLI {
         feed([roptDown, key(49, true), key(49, false), roptUp])
         check("⌥ขวา + space → ยกเลิกกดค้าง แล้วเปิดแฮนด์ฟรี", ["pushToTalk.down", "pushToTalk.cancel", "handsFree.down"], [false, true, true, false])
 
+        // --- เคสจากออดิท ---
+        e.onEscape = { log.append("escape") }
+        e.bindings = [.pushToTalk: [["ropt"]], .pasteLast: [["ctrl", "opt", "k:9"]]]
+        // A2: ⌘V ที่แอปส่งเอง (ติด syntheticMark) ต้องผ่าน ไม่วนกลับมาทริกเกอร์ ⌃⌥V ซ้ำ
+        let ctrlOptDown = flags(58, 0x01 | 0x20 | CGEventFlags.maskControl.rawValue | CGEventFlags.maskAlternate.rawValue)
+        let synthV = key(9, true); synthV.setIntegerValueField(.eventSourceUserData, value: ShortcutEngine.syntheticMark)
+        let synthVUp = key(9, false); synthVUp.setIntegerValueField(.eventSourceUserData, value: ShortcutEngine.syntheticMark)
+        feed([flags(59, 0x01 | CGEventFlags.maskControl.rawValue), ctrlOptDown, key(9, true), key(9, false), synthV, synthVUp,
+              flags(58, 0x01 | CGEventFlags.maskControl.rawValue), flags(59, 0)])
+        check("⌃⌥V แล้ว ⌘V ของแอปเองไม่วนทริกเกอร์ซ้ำ", ["pasteLast.down"], [false, false, true, true, false, false, false, false])
+        // A3: tap ถูกปิดระหว่างกดค้าง → ต้องยกเลิก (ไม่ปล่อยไมค์ค้าง)
+        feed([roptDown]); _ = e.handle(.tapDisabledByTimeout, CGEvent(source: nil)!); swallowed.append(false); feed([roptUp])
+        check("tap ถูกปิดระหว่างกดค้าง → ยกเลิกทันที", ["pushToTalk.down", "pushToTalk.cancel"])
+        // A9: Esc ระหว่างกดค้าง (กำลังพูด) → กลืน + ยกเลิก ไม่หลุดไปแอป
+        e.escapeArmed = true
+        feed([roptDown, key(53, true), key(53, false), roptUp])
+        check("Esc ระหว่างกดค้าง → กลืน + ยกเลิก", ["pushToTalk.down", "escape"], [false, true, true, false])
+        e.escapeArmed = false
+        feed([key(53, true), key(53, false)])
+        check("Esc ตอนว่าง → ผ่านไปแอปตามปกติ", [], [false, false])
+
         var got: [(KeyCombo, Bool)] = []
         e.beginRecording { c, d in got.append((c, d)) }
         feed([fnDown, key(11, true), key(11, false), fnUp])
@@ -296,7 +317,7 @@ public enum WFCLI {
             @MainActor func model(_ setup: (OverlayModel) -> Void) -> OverlayModel {
                 let m = OverlayModel()
                 m.hint = "แตะ fn เพื่อพูดยาว · กดค้าง ⌥ ขวา · หรือคลิกที่นี่"
-                m.levels = (0..<OverlayModel.bars).map { i in CGFloat(abs(sin(Double(i) * 0.7))) * 0.8 + 0.1 }
+                m.meter.set((0..<OverlayModel.bars).map { i in CGFloat(abs(sin(Double(i) * 0.7))) * 0.8 + 0.1 })
                 m.appIcon = NSWorkspace.shared.icon(forFile: "/System/Applications/Notes.app")
                 setup(m)
                 return m

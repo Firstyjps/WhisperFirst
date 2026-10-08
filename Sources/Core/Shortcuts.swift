@@ -123,20 +123,35 @@ enum Keys2 {
 }
 
 /// ฟังปุ่มทั้งระบบผ่าน CGEventTap (ต้องได้สิทธิ์ Accessibility) — กลืนปุ่มที่เป็นส่วนของปุ่มลัด เช่น "b" ใน fn+b ไม่ให้พิมพ์ออกไป
+/// tap รันบน thread ของตัวเอง (ไม่ใช่ main) → main ค้างแค่ไหนคีย์บอร์ดทั้งเครื่องก็ไม่หน่วง และไม่โดนปิดเพราะ timeout
+/// สถานะทั้งหมดป้องกันด้วย lock · callback ทุกตัวส่งกลับ main
 final class ShortcutEngine {
     enum Phase { case down, up, cancel, interrupted }
 
-    var bindings: [ShortcutAction: [KeyCombo]] = [:]
-    /// hold: .down/.up/.cancel(ถูกขยายเป็นชุดอื่น)/.interrupted(กดปุ่มอื่นแทรก) · กดครั้งเดียว: .down
+    /// event ที่แอปสร้างเอง (⌘V ตอนวาง, ⌘C, Enter) ติดเครื่องหมายนี้ → tap ปล่อยผ่าน ไม่วนกลับมาทริกเกอร์ปุ่มลัดซ้ำ
+    static let syntheticMark: Int64 = 0x5746_4D4B   // "WFMK"
+
+    private let lock = NSLock()
+    private var _bindings: [ShortcutAction: [KeyCombo]] = [:]
+    var bindings: [ShortcutAction: [KeyCombo]] {
+        get { lock.lock(); defer { lock.unlock() }; return _bindings }
+        set { lock.lock(); _bindings = newValue; lock.unlock() }
+    }
+    /// hold: .down/.up/.cancel(ถูกขยายเป็นชุดอื่น / tap ถูกปิด)/.interrupted(กดปุ่มอื่นแทรก) · กดครั้งเดียว: .down
     var onAction: (ShortcutAction, Phase) -> Void = { _, _ in }
     var onShift: () -> Void = {}
-    /// Esc ระหว่างพูด/ประมวลผล → ยกเลิก (กลืน Esc เฉพาะตอนที่ใช้)
-    var escapeHandler: () -> Bool = { false }
-    /// โหมดอัดปุ่มลัด (หน้าตั้งค่า): ส่งปุ่มที่กดอยู่ตอนนี้ + done เมื่อปล่อยหมด
-    var recorder: ((KeyCombo, Bool) -> Void)?
+    var onEscape: () -> Void = {}
+    private var _escapeArmed = false
+    /// controller ตั้งเป็น true ตอนกำลังพูด/ประมวลผล → Esc ถูกกลืนและยกเลิก (ไม่หลุดไปแอป)
+    var escapeArmed: Bool {
+        get { lock.lock(); defer { lock.unlock() }; return _escapeArmed }
+        set { lock.lock(); _escapeArmed = newValue; lock.unlock() }
+    }
 
+    private var recorder: ((KeyCombo, Bool) -> Void)?
     private var tap: CFMachPort?
     private var source: CFRunLoopSource?
+    private var runLoop: CFRunLoop?
     private var pressed: Set<String> = []
     private var active: (action: ShortcutAction, combo: KeyCombo)?
     private var pending: (action: ShortcutAction, combo: KeyCombo, at: Date)?
@@ -144,10 +159,11 @@ final class ShortcutEngine {
     private var swallowedMouse: Set<Int64> = []
     private var recordPeak: Set<String> = []
 
-    var isRunning: Bool { tap != nil }
+    var isRunning: Bool { lock.lock(); defer { lock.unlock() }; return tap != nil }
 
     @discardableResult
     func start() -> Bool {
+        lock.lock(); defer { lock.unlock() }
         if tap != nil { return true }
         let types: [CGEventType] = [.keyDown, .keyUp, .flagsChanged, .otherMouseDown, .otherMouseUp]
         let mask = types.reduce(CGEventMask(0)) { $0 | (1 << $1.rawValue) }
@@ -161,24 +177,55 @@ final class ShortcutEngine {
             return false
         }
         tap = t
-        source = CFMachPortCreateRunLoopSource(nil, t, 0)
-        CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
-        CGEvent.tapEnable(tap: t, enable: true)
-        Log.write("shortcuts: เริ่มฟังปุ่ม")
+        let src = CFMachPortCreateRunLoopSource(nil, t, 0)
+        source = src
+        let th = Thread { [weak self] in
+            let rl = CFRunLoopGetCurrent()
+            self?.lock.lock(); self?.runLoop = rl; self?.lock.unlock()
+            CFRunLoopAddSource(rl, src, .commonModes)
+            CGEvent.tapEnable(tap: t, enable: true)
+            CFRunLoopRun()
+        }
+        th.name = "wf.eventtap"
+        th.qualityOfService = .userInteractive
+        th.start()
+        Log.write("shortcuts: เริ่มฟังปุ่ม (thread แยก)")
         return true
+    }
+
+    /// เสียสิทธิ์ Accessibility → ปิด tap ให้เรียบร้อย (เปิดใหม่ด้วย start())
+    func stop() {
+        lock.lock(); defer { lock.unlock() }
+        guard let t = tap else { return }
+        CGEvent.tapEnable(tap: t, enable: false)
+        CFMachPortInvalidate(t)
+        if let rl = runLoop { CFRunLoopStop(rl) }
+        tap = nil; source = nil; runLoop = nil
+        resetState()
+        Log.write("shortcuts: ปิด event tap")
+    }
+
+    private func resetState() {
+        if let a = active, a.action.isHold { fire(a.action, .cancel) }   // ไม่ปล่อยให้ไมค์ค้างรอ keyUp ที่จะไม่มาแล้ว
+        pressed.removeAll(); active = nil; pending = nil
+        swallowedKeys.removeAll(); swallowedMouse.removeAll()
     }
 
     // MARK: event
 
     func handle(_ type: CGEventType, _ e: CGEvent) -> Unmanaged<CGEvent>? {   // internal: CLI ทดสอบป้อน event จำลองได้
+        lock.lock(); defer { lock.unlock() }
+        let pass = Unmanaged.passUnretained(e)
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
             if let tap { CGEvent.tapEnable(tap: tap, enable: true) }
-            pressed.removeAll(); active = nil; pending = nil
-            return Unmanaged.passUnretained(e)
+            Log.write("shortcuts: tap ถูกปิด (\(type == .tapDisabledByTimeout ? "timeout" : "user input")) → เปิดใหม่ + ยกเลิกปุ่มที่ค้าง")
+            resetState()
+            return pass
         }
-        let pass = Unmanaged.passUnretained(e)
+        if e.getIntegerValueField(.eventSourceUserData) == Self.syntheticMark { return pass }
         switch type {
         case .flagsChanged:
+            pruneStale()
             let before = pressed
             updateModifiers(e)
             let added = pressed.subtracting(before), removed = before.subtracting(pressed)
@@ -194,15 +241,24 @@ final class ShortcutEngine {
                 if e.getIntegerValueField(.keyboardEventAutorepeat) != 0 {
                     return swallowedKeys.contains(code) || recorder != nil ? nil : pass
                 }
+                pruneStale()
                 if recorder != nil {
-                    if code == Int64(kVK_Escape) && pressed.filter({ !Keys2.isModifier($0) }).isEmpty && !pressed.contains(where: Keys2.isModifier) {
-                        recorder?([], true); recordPeak = []; return nil   // Esc เดี่ยว = ยกเลิกการอัด
+                    if code == Int64(kVK_Escape) && pressed.isEmpty {
+                        let cb = recorder
+                        recordPeak = []
+                        DispatchQueue.main.async { cb?([], true) }   // Esc เดี่ยว = ยกเลิกการอัด
+                        return nil
                     }
                     pressed.insert(token); record(); return nil
                 }
-                if code == Int64(kVK_Escape), active == nil, escapeHandler() { return nil }
-                pruneStale()
+                if code == Int64(kVK_Escape), _escapeArmed {
+                    active = nil; pending = nil          // Esc ระหว่างกดค้าง = ยกเลิก ไม่ใช่ "กดปุ่มอื่นแทรก"
+                    swallowedKeys.insert(code)
+                    DispatchQueue.main.async { self.onEscape() }
+                    return nil
+                }
                 if keyDown(token) { swallowedKeys.insert(code); return nil }
+                swallowedKeys.remove(code)   // ปุ่มนี้ไม่ได้ถูกกลืนแล้ว → keyUp ต้องผ่าน (กันปุ่มค้างในแอป)
                 return pass
             } else {
                 if recorder != nil { pressed.remove(token); record(); return nil }
@@ -220,7 +276,9 @@ final class ShortcutEngine {
                 record(); return nil
             }
             if type == .otherMouseDown {
+                pruneStale()
                 if keyDown(token) { swallowedMouse.insert(n); return nil }
+                swallowedMouse.remove(n)
                 return pass
             }
             keyUp(token)
@@ -244,10 +302,12 @@ final class ShortcutEngine {
         }
     }
 
-    /// ปุ่มที่ค้างอยู่ในสถานะแต่จริงๆ ปล่อยไปแล้ว (keyUp หลุด เช่นตอนช่องรหัสผ่านเปิด secure input)
+    /// ปุ่ม/เมาส์ที่ค้างอยู่ในสถานะแต่จริงๆ ปล่อยไปแล้ว (keyUp หลุด เช่นตอนช่องรหัสผ่านเปิด secure input)
     private func pruneStale() {
-        for t in pressed where t.hasPrefix("k:") {
-            if let c = UInt16(t.dropFirst(2)), !CGEventSource.keyState(.combinedSessionState, key: c) { pressed.remove(t) }
+        for t in pressed {
+            if t.hasPrefix("k:"), let c = UInt16(t.dropFirst(2)), !CGEventSource.keyState(.combinedSessionState, key: c) { pressed.remove(t) }
+            if t.hasPrefix("m:"), let n = UInt32(t.dropFirst(2)), let b = CGMouseButton(rawValue: n),
+               !CGEventSource.buttonState(.combinedSessionState, button: b) { pressed.remove(t) }
         }
     }
 
@@ -265,13 +325,13 @@ final class ShortcutEngine {
     }
 
     private func match() -> (ShortcutAction, KeyCombo)? {
-        for a in ShortcutAction.allCases { for c in bindings[a] ?? [] where !c.isEmpty && exact(c) { return (a, c) } }
+        for a in ShortcutAction.allCases { for c in _bindings[a] ?? [] where !c.isEmpty && exact(c) { return (a, c) } }
         return nil
     }
 
     /// มีชุดอื่นที่ใหญ่กว่าและครอบชุดนี้ไหม (เช่น "fn" กับ "fn b") → ชุดเล็กต้องรอดูว่าจะกดต่อไหม
     private func hasSuperset(_ c: KeyCombo) -> Bool {
-        bindings.values.joined().contains { other in other.count > c.count && c.allSatisfy { other.contains($0) || other.contains(Keys2.agnostic($0)) } }
+        _bindings.values.joined().contains { other in other.count > c.count && c.allSatisfy { other.contains($0) || other.contains(Keys2.agnostic($0)) } }
     }
 
     /// คืน true = กลืน event นี้
@@ -331,13 +391,20 @@ final class ShortcutEngine {
     // MARK: อัดปุ่มลัด
 
     func beginRecording(_ cb: @escaping (KeyCombo, Bool) -> Void) {
+        lock.lock(); defer { lock.unlock() }
+        if let a = active, a.action.isHold { fire(a.action, .cancel) }
         recordPeak = []
         active = nil
         pending = nil
         recorder = cb
     }
 
-    func endRecording() { recorder = nil; recordPeak = [] }
+    func endRecording() {
+        lock.lock(); defer { lock.unlock() }
+        recorder = nil; recordPeak = []
+    }
+
+    var isRecording: Bool { lock.lock(); defer { lock.unlock() }; return recorder != nil }
 
     private func record() {
         if pressed.isEmpty && recordPeak.isEmpty { return }   // flagsChanged ว่าง (เช่น caps lock) ไม่ใช่การกด

@@ -1,60 +1,48 @@
 import Foundation
 
-/// ตรวจช่วงพูด/เงียบจากระดับเสียง (RMS) — ปรับระดับเสียงรบกวนพื้นหลังเอง
+/// ตรวจช่วงพูด/เงียบจากระดับเสียง (RMS) — ปรับระดับเสียงรบกวนพื้นหลังเอง (ใช้ประกอบ ไม่ใช้ตัดสินหลัก: ไมค์เบาทำให้ประเมินต่ำ)
 struct SpeechGate {
     static let rate = 16000
     private(set) var noise: Float = 0.004
     private var voicedRun = 0
-    private var silenceRun = 0
-    private(set) var inSpeech = false
-    /// ตำแหน่ง (sample) ที่เสียงพูดล่าสุดจบ
-    private(set) var lastVoiceEnd = 0
     private(set) var voicedTotal = 0
-    private var total = 0
 
     var threshold: Float { max(0.006, noise * 3) }
 
-    /// คืน true เมื่อเพิ่งเงียบต่อเนื่องครบ `pause` วินาทีหลังจากพูด
-    mutating func feed(rms: Float, samples n: Int, pause: Double) -> Bool {
-        total += n
+    mutating func feed(rms: Float, samples n: Int) {
         if rms > threshold {
             voicedRun += n
-            silenceRun = 0
-            if voicedRun >= Self.rate * 12 / 100 { inSpeech = true }      // ≥120ms ติดกัน = พูดจริง (ไม่ใช่เสียงคลิก)
-            if inSpeech { lastVoiceEnd = total; voicedTotal += n }
-            return false
+            if voicedRun >= Self.rate * 12 / 100 { voicedTotal += n }   // ≥120ms ติดกัน = พูดจริง (ไม่ใช่เสียงคลิก)
+            return
         }
         voicedRun = 0
-        silenceRun += n
         noise = noise * 0.97 + min(rms, 0.05) * 0.03
-        if inSpeech && silenceRun >= Int(Double(Self.rate) * pause) {
-            inSpeech = false
-            return true
-        }
-        return false
     }
 }
 
-/// หนึ่งรอบการพูด: รับเสียงทีละก้อนระหว่างพูด → ตอนเงียบ ส่งไปเกลาล่วงหน้า (speculative)
-/// ตอนปล่อยปุ่ม ถ้าไม่ได้พูดอะไรเพิ่มหลังรอบล่วงหน้า → ใช้ผลนั้นเลย (เสร็จก่อน/ใกล้ๆ ตอนปล่อย)
-/// ถ้าพูดต่อ → ทิ้งแล้วส่งเสียงเต็มใหม่ — ความแม่นเท่าเดิมเพราะ Gemini ได้ฟังเสียงครบทุกครั้ง
+/// หนึ่งรอบการพูด: เก็บเสียง → ตอนปล่อยปุ่มเลือกทาง
+/// - ทางเร็ว: ข้อความที่ Live ถอดครบแล้ว (ประโยคสั้นช่วงเดียว) → เกลาด้วยข้อความล้วน · ถ้า Live ส่งฉบับสุดท้ายตั้งแต่ยังกดค้าง → เริ่มเกลาล่วงหน้า
+/// - ทางส่งเสียง: Gemini ฟังเสียงเต็มเอง (ยิงสำรองไว้ที่ +0.6 วิ เผื่อ Live ช้า)
+/// - ด่านคุณภาพ: ไม่มีเสียงพูด → ไม่เรียกโมเดลเลย · ผลไม่ตรงกับ transcript / transcript ไม่ใช่ไทย-อังกฤษ → ใช้ทางส่งเสียงแทน
 final class DictationSession {
+    struct NoSpeech: Error {}
+
     private let transcriber: Transcriber
     private let q = DispatchQueue(label: "wf.session")
     private var pcm = Data()
     private var gate = SpeechGate()
     private var base: DictationInput
-    private var spec: (end: Int, task: Task<DictationResult, Error>, at: Date)?
-    private var specCount = 0
-    private var lastSpecAt = Date.distantPast
-    private(set) var peak: Float = 0
-    var speculate = Store.config.speculative
-    /// ข้อความสด (Live) — ถ้ามี ตอนจบใช้ข้อความฉบับสุดท้ายไปเกลาแบบไม่ส่งเสียง
+    private var peak: Float = 0
+    /// ไม่นับ peak/gate จนถึง sample นี้ (เสียง Tink ของแอปเองเข้าไมค์)
+    private var ignoreUntil = 0
+    /// เกลาล่วงหน้าจาก Live (ตอนผู้ใช้หยุดพูดแต่ยังกดค้าง)
+    private var early: (text: String, task: Task<DictationResult, Error>)?
+    private var earlyCount = 0
     var live: LiveTranscriber?
     private(set) var usedText = false
-    let pause = 0.3
-    /// log ไว้ดูว่าช่วยได้จริงไหม
-    private(set) var usedSpeculative = false
+    private(set) var usedEarly = false
+    /// input ที่ประกอบแล้วตอนจบ (ไว้ให้ปุ่ม Retry ใช้ — มีบริบทก่อนเคอร์เซอร์ครบ)
+    private(set) var builtInput: DictationInput?
 
     init(transcriber: Transcriber, appName: String, bundleID: String) {
         self.transcriber = transcriber
@@ -62,16 +50,20 @@ final class DictationSession {
     }
 
     var seconds: Double { q.sync { Double(pcm.count) / 32000 } }
-    var wav: Data { q.sync { WAV.encode(pcm: WAV.normalized(pcm)) } }
+    var peakValue: Float { q.sync { peak } }
+    var voicedSeconds: Double { q.sync { Double(gate.voicedTotal) / Double(SpeechGate.rate) } }
 
     func setBefore(_ s: String?) { q.async { self.base.before = s } }
 
-    /// โหมดคำสั่งต้องรู้ข้อความที่เลือกก่อน → ไม่เดาล่วงหน้า
+    /// แอปกำลังเล่นเสียงเริ่ม (Tink) → ไม่นับ ~0.25 วิถัดไป
+    func ignoreNext(seconds: Double) {
+        q.async { self.ignoreUntil = self.pcm.count / 2 + Int(seconds * Double(SpeechGate.rate)) }
+    }
+
     func setCommand() {
         q.async {
             self.base.command = true
-            self.spec?.task.cancel()
-            self.spec = nil
+            self.early?.task.cancel(); self.early = nil
         }
     }
 
@@ -79,112 +71,117 @@ final class DictationSession {
     func append(_ chunk: Data, rms: Float) {
         q.async {
             self.pcm.append(chunk)
+            guard self.pcm.count / 2 > self.ignoreUntil else { return }
             self.peak = max(self.peak, rms)
-            let paused = self.gate.feed(rms: rms, samples: chunk.count / 2, pause: self.pause)
-            if paused { self.maybeSpeculate() }
+            self.gate.feed(rms: rms, samples: chunk.count / 2)
         }
     }
 
-    private func maybeSpeculate() {
-        guard speculate, !base.command, specCount < 4, !Transcriber.throttled,
-              gate.voicedTotal >= SpeechGate.rate / 2,                  // พูดรวม ≥0.5 วิ (ไม่ยิงตอนพูดแค่ "เอ่อ")
-              Date().timeIntervalSince(lastSpecAt) > 1.5 else { return }
-        spec?.task.cancel()
-        var input = base
-        input.wav = WAV.encode(pcm: WAV.normalized(pcm))
-        input.seconds = Double(pcm.count) / 32000
-        let t = transcriber
-        let primary = Array(Store.config.models.prefix(1))   // รอบล่วงหน้ายิงตัวเดียว ประหยัด quota
-        spec = (pcm.count / 2, Task { try await t.run(input, models: primary, fallback: false) }, Date())
-        specCount += 1
-        lastSpecAt = Date()
-        Log.write("speculate #\(specCount) at \(String(format: "%.1f", input.seconds))s")
+    /// Live ได้ฉบับสุดท้ายครบทุกช่วงตอนผู้ใช้หยุดพูด (ยังกดค้าง) → เริ่มเกลาเลย ถ้าปล่อยปุ่มโดยไม่พูดต่อ ผลพร้อมเร็วขึ้น
+    func liveSettled(text: String, segments: Int, spoken: Double?) {
+        q.async {
+            guard Store.config.fastText, !self.base.command, segments == 1, self.earlyCount < 3,
+                  self.early?.text != text,
+                  (spoken ?? Double(self.pcm.count) / 32000) <= 15,
+                  Self.looksComplete(text, seconds: spoken ?? Double(self.pcm.count) / 32000),
+                  Self.mostlyThaiOrLatin(text) else { return }
+            self.early?.task.cancel()
+            var ti = self.base
+            ti.transcript = text
+            ti.before = nil
+            let t = self.transcriber
+            self.early = (text, Task { try await t.run(ti, fallback: false) })
+            self.earlyCount += 1
+        }
     }
 
     /// ตอนปล่อยปุ่ม
     func finish(selected: String? = nil) async throws -> DictationResult {
-        let (input, s, lastVoice) = q.sync { () -> (DictationInput, (end: Int, task: Task<DictationResult, Error>, at: Date)?, Int) in
+        let input = q.sync { () -> DictationInput in
             var i = base
             i.wav = WAV.encode(pcm: WAV.normalized(pcm))
             i.seconds = Double(pcm.count) / 32000
             i.selected = selected
-            let tail = Double(pcm.count / 2 - gate.lastVoiceEnd) / Double(SpeechGate.rate)
-            Log.write(String(format: "gate: เสียง %.1fs พูด %.1fs เงียบท้าย %.2fs noise=%.4f peak=%.3f ล่วงหน้า %d ครั้ง",
-                             i.seconds, Double(gate.voicedTotal) / Double(SpeechGate.rate), tail, gate.noise, peak, specCount))
-            return (i, spec, gate.lastVoiceEnd)
+            Log.write(String(format: "gate: เสียง %.1fs พูด %.1fs noise=%.4f peak=%.3f",
+                             i.seconds, Double(gate.voicedTotal) / Double(SpeechGate.rate), gate.noise, peak))
+            return i
         }
-        // ทางเร็ว: ข้อความที่ Live ถอดครบทั้งช่วงแล้ว → เกลาด้วยข้อความล้วน
-        if let live, !input.command, Store.config.fastText {
-            let t0 = Date()
-            let tx = await live.finish()
-            try Task.checkCancellation()
-            let segs = live.segments
-            // ใช้ทางเร็วเฉพาะประโยคสั้นช่วงเดียว: ทดสอบแล้ว Live ข้ามเนื้อหาทั้งประโยคได้เมื่อพูดยาวหลายช่วง
-            if let tx = tx?.trimmingCharacters(in: .whitespacesAndNewlines), input.seconds <= 15, segs <= 1,
-               Self.looksComplete(tx, seconds: input.seconds) {
-                s?.task.cancel()
-                Log.write("live final +\(Int(Date().timeIntervalSince(t0) * 1000))ms (\(tx.count) ตัว): \(tx)")
-                var ti = input
-                ti.transcript = tx
-                do {
-                    let r = try await transcriber.run(ti, fallback: false)
-                    usedText = true
-                    return r
-                } catch is CancellationError {
-                    throw CancellationError()
-                } catch {
-                    Log.write("text path ล้ม → ส่งเสียง: \(error.localizedDescription)")
-                }
-            } else {
-                Log.write("ใช้ทางส่งเสียง: live \(tx?.count ?? -1) ตัว · \(segs) ช่วง · เสียง \(String(format: "%.1f", input.seconds))s")
-            }
+        builtInput = input
+        let voiced = voicedSeconds
+        defer { live?.stop(); q.async { self.early?.task.cancel() } }   // ไม่ปล่อย WebSocket/งานค้าง
+
+        guard let live else { return try await transcriber.run(input) }
+
+        // โหมดคำสั่ง / แม่นสุด: ส่งเสียงเสมอ แต่ยังกันกรณีไม่ได้พูดเลย
+        if input.command || !Store.config.fastText {
+            let tx = await live.finish(timeout: 0.5)
+            if try isNoSpeech(live, tx, voiced) { throw NoSpeech() }
             return try await transcriber.run(input)
         }
-        if let s, !input.command, lastVoice <= s.end {
-            // แข่ง: ผลล่วงหน้า (โมเดลหลัก ยิงไว้ก่อน) vs โมเดลสำรองที่ยิงตอนปล่อยปุ่ม (เสียงเต็ม)
-            // สำรองเสร็จก่อน → รอโมเดลหลัก (แม่นกว่า) อีกไม่เกิน grace วิ · ติด quota → สำรองรอ 1.5 วิก่อนค่อยยิง
-            let t = transcriber
-            let models = Store.config.models
-            let backup = models.count > 1 ? Array(models.dropFirst()) : models
-            let backupDelay = Transcriber.throttled ? 1.5 : 0
-            let grace = min(0.5, Store.config.preferGrace)
-            let r: DictationResult? = await withTaskGroup(of: (Int, DictationResult?).self) { g in
-                g.addTask {
-                    let v = try? await withTaskCancellationHandler { try await s.task.value } onCancel: { s.task.cancel() }
-                    return (0, v)
-                }
-                g.addTask {
-                    if backupDelay > 0 { try? await Task.sleep(nanoseconds: UInt64(backupDelay * 1_000_000_000)) }
-                    if Task.isCancelled { return (1, nil) }
-                    return (1, try? await t.run(input, models: backup, fallback: false))
-                }
-                var pending = 2
-                var held: DictationResult?
-                for await (who, v) in g {
-                    pending -= 1
-                    if who == 0, let v { g.cancelAll(); self.usedSpeculative = true; return v }
-                    if who == 2 { if let held { g.cancelAll(); return held }; continue }      // หมดเวลารอโมเดลหลัก
-                    if who == 1, let v {
-                        if pending == 0 { return v }
-                        held = v
-                        g.addTask { try? await Task.sleep(nanoseconds: UInt64(grace * 1_000_000_000)); return (2, nil) }
-                        pending += 1
-                        continue
-                    }
-                    if pending == 0 || (pending == 1 && held != nil) { if let held { g.cancelAll(); return held } }
-                }
-                return held
+
+        // เกินเกณฑ์ชัดๆ (ยาว/หลายช่วง) → ไม่ต้องรอ Live
+        if input.seconds > 24 || live.segments > 1 {
+            Log.write("ใช้ทางส่งเสียง: \(live.segments) ช่วง · เสียง \(String(format: "%.1f", input.seconds))s")
+            return try await transcriber.run(input)
+        }
+
+        // สำรอง: ถ้า Live ส่งฉบับสุดท้ายช้ากว่า 0.6 วิ ทางส่งเสียงเริ่มไปก่อนแล้ว
+        let t = transcriber
+        let audio = Task { () throws -> DictationResult in
+            try await Task.sleep(nanoseconds: 600_000_000)
+            return try await t.run(input)
+        }
+        return try await withTaskCancellationHandler {
+            let t0 = Date()
+            let raw = await live.finish(timeout: 0.8)
+            try Task.checkCancellation()
+            if try isNoSpeech(live, raw, voiced) { audio.cancel(); throw NoSpeech() }
+            let segs = live.segments
+            let spoken = live.spokenSeconds ?? input.seconds
+            guard let tx = raw?.trimmingCharacters(in: .whitespacesAndNewlines), segs <= 1, spoken <= 15,
+                  Self.looksComplete(tx, seconds: spoken) else {
+                Log.write("ใช้ทางส่งเสียง: live \(raw?.count ?? -1) ตัว · \(segs) ช่วง · พูด \(String(format: "%.1f", spoken))s")
+                return try await audio.value
+            }
+            guard Self.mostlyThaiOrLatin(tx) else {
+                Log.write("live ได้อักษรภาษาอื่น → ส่งเสียง")
+                return try await audio.value
+            }
+            Log.write("live final +\(Int(Date().timeIntervalSince(t0) * 1000))ms (\(tx.count) ตัว)")
+            var result: DictationResult?
+            if let e = q.sync(execute: { early }), e.text == tx, let r = try? await e.task.value {
+                result = r; usedEarly = true
+            }
+            if result == nil {
+                var ti = input
+                ti.transcript = tx
+                ti.before = nil   // ทางเร็วไม่ส่งข้อความก่อนเคอร์เซอร์ (ต้นเหตุก๊อปข้อความเก่ามาวางซ้ำ)
+                result = try? await transcriber.run(ti, fallback: false)
             }
             try Task.checkCancellation()
-            if let r {
-                Log.write(usedSpeculative ? "speculative hit (request ใช้เวลารวม \(String(format: "%.2f", Date().timeIntervalSince(s.at)))s)" : "สำรองที่ยิงตอนปล่อยปุ่มชนะ")
-                return r
+            if let r = result {
+                let sim = Self.similarity(tx, r.text)
+                if sim >= 0.35 {
+                    audio.cancel()
+                    usedText = true
+                    return r
+                }
+                Log.write(String(format: "ผลไม่ตรงกับ transcript (%.2f) → ส่งเสียง", sim))
+            } else {
+                Log.write("ทางเร็วล้ม → ส่งเสียง")
             }
-            Log.write("speculative fail → ส่งใหม่")
-        } else {
-            s?.task.cancel()
+            return try await audio.value
+        } onCancel: {
+            audio.cancel()
         }
-        return try await transcriber.run(input)
+    }
+
+    /// Live ทำงานปกติแต่ไม่เจอช่วงพูดเลย + ระดับเสียงก็แทบไม่มีเสียงพูด → อย่าเรียกโมเดล (กันโมเดลแต่งประโยคเอง)
+    private func isNoSpeech(_ live: LiveTranscriber, _ tx: String?, _ voiced: Double) throws -> Bool {
+        let empty = (tx ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let no = !live.hasFailed && tx != nil && live.segments == 0 && empty && voiced < 0.3
+        if no { Log.write(String(format: "ไม่มีเสียงพูด (Live 0 ช่วง · gate %.2fs) → ไม่เรียกโมเดล", voiced)) }
+        return no
     }
 
     /// ข้อความถอดยาวพอกับความยาวเสียงไหม (ภาษาไทยพูด ~8–15 ตัวอักษร/วิ — ต่ำกว่า 3/วิ = น่าจะขาด)
@@ -192,11 +189,34 @@ final class DictationSession {
         !tx.isEmpty && Double(tx.count) >= seconds * 3 - 6
     }
 
+    /// ตัวอักษรเป็นไทย/ละตินพื้นฐานอย่างน้อย 90% (Live บางทีถอดเป็นอักษรพม่า/เวียดนาม)
+    static func mostlyThaiOrLatin(_ s: String) -> Bool {
+        var ok = 0, total = 0
+        for u in s.unicodeScalars where !CharacterSet.whitespacesAndNewlines.contains(u) {
+            total += 1
+            if (0x0E00...0x0E7F).contains(u.value) || u.value < 0x250 || CharacterSet.punctuationCharacters.contains(u) { ok += 1 }
+        }
+        return total == 0 || Double(ok) / Double(total) >= 0.9
+    }
+
+    /// ความคล้ายระดับตัวอักษร (2·LCS / ความยาวรวม) ไม่นับช่องว่าง/เครื่องหมาย
+    static func similarity(_ a: String, _ b: String) -> Double {
+        let strip: (String) -> [Unicode.Scalar] = { s in
+            Array(s.lowercased().unicodeScalars.filter { !CharacterSet.whitespacesAndNewlines.union(.punctuationCharacters).contains($0) }.prefix(600))
+        }
+        let x = strip(a), y = strip(b)
+        if x.isEmpty && y.isEmpty { return 1 }
+        if x.isEmpty || y.isEmpty { return 0 }
+        var prev = [Int](repeating: 0, count: y.count + 1), cur = prev
+        for i in 1...x.count {
+            for j in 1...y.count { cur[j] = x[i - 1] == y[j - 1] ? prev[j - 1] + 1 : max(prev[j], cur[j - 1]) }
+            swap(&prev, &cur)
+        }
+        return 2 * Double(prev[y.count]) / Double(x.count + y.count)
+    }
+
     func cancel() {
         live?.cancel()
-        q.async {
-            self.spec?.task.cancel()
-            self.spec = nil
-        }
+        q.async { self.early?.task.cancel(); self.early = nil }
     }
 }

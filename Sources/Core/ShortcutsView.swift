@@ -1,4 +1,5 @@
 import AppKit
+import Carbon.HIToolbox
 import SwiftUI
 
 /// หน้า "ปุ่มลัด" แบบ Wispr Flow: แต่ละ action มีหลายชุด · ✎ อัดใหม่ · 🗑 ลบ · + เพิ่ม · คืนค่าเริ่มต้น
@@ -21,6 +22,8 @@ final class ShortcutsModel: ObservableObject {
 
     func combos(_ a: ShortcutAction) -> [KeyCombo] { bindings[a] ?? [] }
 
+    private var timeout: DispatchWorkItem?
+
     func startRecording(_ a: ShortcutAction, index: Int?) {
         if recording != nil { engine.endRecording() }
         recording = Slot(action: a, index: index)
@@ -29,9 +32,22 @@ final class ShortcutsModel: ObservableObject {
         engine.beginRecording { [weak self] combo, done in
             MainActor.assumeIsolated { self?.recorded(combo, done: done) }
         }
+        // กันโหมดอัดค้าง (ระหว่างอัดปุ่มทั้งเครื่องถูกกลืน) → ยกเลิกเองหลัง 10 วิ
+        timeout?.cancel()
+        let w = DispatchWorkItem { [weak self] in
+            guard let self, self.recording != nil else { return }
+            self.cancelRecording()
+            self.message = "Recording timed out — click the shortcut to try again"
+            self.messageIsError = true
+        }
+        timeout = w
+        DispatchQueue.main.asyncAfter(deadline: .now() + 10, execute: w)
     }
 
+    /// เรียกเมื่อออกจากหน้า Shortcuts / ปิดหน้าต่าง / สลับไปแอปอื่น — ห้ามปล่อยให้อัดค้าง
     func cancelRecording() {
+        timeout?.cancel()
+        guard recording != nil || engine.isRecording else { return }
         engine.endRecording()
         recording = nil
         live = []
@@ -40,6 +56,7 @@ final class ShortcutsModel: ObservableObject {
     private func recorded(_ combo: KeyCombo, done: Bool) {
         guard let slot = recording else { return }
         if !done { live = combo; return }
+        timeout?.cancel()
         engine.endRecording()
         recording = nil
         live = []
@@ -63,6 +80,13 @@ final class ShortcutsModel: ObservableObject {
             }
         }
         let mods = c.filter(Keys2.isModifier), keys = c.filter { $0.hasPrefix("k:") }
+        // คีย์ลัดของระบบ (⌘C ⌘V ⌘S ⌘Q ⌘Tab ฯลฯ) — ถ้าตั้งไว้ จะถูกกลืนทั้งเครื่อง
+        let reserved: Set<Int> = [kVK_ANSI_A, kVK_ANSI_C, kVK_ANSI_V, kVK_ANSI_X, kVK_ANSI_Z, kVK_ANSI_S, kVK_ANSI_Q, kVK_ANSI_W,
+                                  kVK_ANSI_N, kVK_ANSI_T, kVK_ANSI_F, kVK_ANSI_P, kVK_ANSI_H, kVK_ANSI_M, kVK_Tab, kVK_Space, kVK_ANSI_Grave]
+        if keys.count == 1, let code = Int(keys[0].dropFirst(2)), reserved.contains(code),
+           !mods.isEmpty, mods.allSatisfy({ ["cmd", "shift"].contains(Keys2.agnostic($0)) }), mods.contains(where: { Keys2.agnostic($0) == "cmd" }) {
+            return "\(Self.display(c)) is a system shortcut — pick something with ⌃ or ⌥"
+        }
         if !keys.isEmpty, !keys.contains(where: Keys2.isFunctionKey), !c.contains(where: { $0.hasPrefix("m:") }) {
             if mods.isEmpty { return "Letters on their own would stop you typing them — add ⌃, ⌥ or ⌘" }
             if mods.allSatisfy({ Keys2.agnostic($0) == "shift" }) { return "⇧ + a letter is just a capital letter — use ⌃, ⌥ or ⌘ instead" }
@@ -146,6 +170,7 @@ struct ShortcutsTab: View {
             .font(.system(size: 12.5)).foregroundStyle(Theme.muted).padding(.leading, 4)
         }
         .animation(.easeOut(duration: 0.2), value: m.message)
+        .onDisappear { m.cancelRecording() }
     }
 
     private func row(_ a: ShortcutAction) -> some View {
@@ -229,5 +254,10 @@ private struct ComboField: View {
         .contentShape(Rectangle())
         .onTapGesture { if !rec { m.startRecording(action, index: index) } }
         .onHover { hover.on = $0 }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(action.title) shortcut: \(combo.isEmpty ? "not set" : ShortcutsModel.display(combo))")
+        .accessibilityHint(rec ? "Press the keys you want" : "Activate to change")
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction { if !rec { m.startRecording(action, index: index) } }
     }
 }
