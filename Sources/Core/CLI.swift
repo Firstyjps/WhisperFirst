@@ -10,6 +10,7 @@ public enum WFCLI {
         if args.count >= 4, args[1] == "learn" { return learn(args) }
         if args.count >= 2, args[1] == "learn-e2e" { return learnE2E() }
         if args.count >= 2, args[1] == "shortcuts-test" { return shortcutsTest() }
+        if args.count >= 2, args[1] == "snippets-test" { return snippetsTest() }
         if args.count >= 3, args[1] == "render-shortcuts" { return renderShortcuts(args[2]) }
         if args.count >= 3, args[1] == "render-island" { return renderIsland(args[2]) }
         if args.count >= 3, args[1] == "live" { return liveTest(args[2]) }
@@ -375,6 +376,35 @@ public enum WFCLI {
     }
 
     /// เรนเดอร์หน้าต่างหลักแต่ละหน้าเป็นภาพ (ใช้ข้อมูลจริง) → <prefix>-home.png ฯลฯ
+    /// ทดสอบการขยายวลีลัด (ไม่แตะ snippets.json ของผู้ใช้)
+    static func snippetsTest() {
+        let list = [Snippet(trigger: "อีเมลงาน", text: "me@work.com"),
+                    Snippet(trigger: "ลงท้ายอีเมล", text: "ขอบคุณครับ\nสมชาย"),
+                    Snippet(trigger: "my zoom", text: "https://zoom.us/j/123"),
+                    Snippet(trigger: "อีเมล", text: "SHORT")]
+        let cases: [(String, String)] = [
+            ("อีเมลงาน", "me@work.com"),
+            ("อีเมลงานครับ", "me@work.com"),
+            ("อีเมล งาน", "me@work.com"),
+            ("ส่งไปที่อีเมลงานนะ", "ส่งไปที่ me@work.com นะ"),
+            ("ส่งไปที่ อีเมลงาน นะ", "ส่งไปที่ me@work.com นะ"),
+            ("เข้าห้อง My Zoom ได้เลย", "เข้าห้อง https://zoom.us/j/123 ได้เลย"),
+            ("my zoomer friend", "my zoomer friend"),
+            ("ลงท้ายอีเมล", "ขอบคุณครับ\nสมชาย"),
+            ("วันนี้ไม่มีอะไร", "วันนี้ไม่มีอะไร"),
+            ("อีเมลงาน กับ อีเมล", "me@work.com กับ SHORT"),
+        ]
+        var fail = 0
+        for (input, want) in cases {
+            let got = Snippets.expand(input, with: list).text
+            let ok = got == want
+            if !ok { fail += 1 }
+            print("\(ok ? "✅" : "❌") \(input.debugDescription) → \(got.debugDescription)\(ok ? "" : " (ต้องได้ \(want.debugDescription))")")
+        }
+        print(fail == 0 ? "ผ่านทั้งหมด" : "ไม่ผ่าน \(fail) กรณี")
+        if fail > 0 { exit(1) }
+    }
+
     static func renderHub(_ prefix: String) {
         MainActor.assumeIsolated {
             let h = HubModel(settings: SettingsModel(engine: ShortcutEngine()), overlay: OverlayModel())

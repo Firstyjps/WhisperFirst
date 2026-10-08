@@ -43,7 +43,7 @@ enum Prompt {
             .replacingOccurrences(of: "{{APP}}", with: app.isEmpty ? "ไม่ทราบ" : app)
             .replacingOccurrences(of: "{{APP_HINT}}", with: hint)
             .replacingOccurrences(of: "{{ABOUT_ME}}", with: about?.isEmpty == false ? about! : "-")
-            .replacingOccurrences(of: "{{DICTIONARY}}", with: dictionaryText(transcript: transcript))
+            .replacingOccurrences(of: "{{DICTIONARY}}", with: dictionaryText(transcript: transcript) + (command ? "" : Snippets.promptText().map { "\n" + $0 } ?? ""))
     }
 
     /// บรรทัดธรรมดา = คำที่ต้องสะกดแบบนี้

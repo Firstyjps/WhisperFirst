@@ -311,6 +311,12 @@ final class Controller {
     private func deliver(_ r: DictationResult, command: Bool, seconds: Double, auto: Bool = false) {
         task = nil
         state = .idle
+        var r = r
+        // วลีลัด → ข้อความเต็ม (ขยายในเครื่อง ไม่ผ่านโมเดล)
+        if !command {
+            let x = Snippets.expand(r.text)
+            if !x.used.isEmpty { r.text = x.text; Log.write("snippet: ใช้ \(x.used.count) วลี") }
+        }
         var text = r.text
         guard !text.isEmpty else {
             overlay.flash("No speech detected")

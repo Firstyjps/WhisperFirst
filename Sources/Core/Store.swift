@@ -7,6 +7,7 @@ enum Paths {
     static var config: URL { support.appendingPathComponent("config.json") }
     static var env: URL { support.appendingPathComponent(".env") }
     static var dictionary: URL { support.appendingPathComponent("dictionary.txt") }
+    static var snippets: URL { support.appendingPathComponent("snippets.json") }
     static var aboutMe: URL { support.appendingPathComponent("about-me.md") }
     static var prompts: URL { support.appendingPathComponent("prompts") }
     static var history: URL { support.appendingPathComponent("history.jsonl") }

@@ -7,13 +7,14 @@ import SwiftUI
 @MainActor
 final class HubModel: ObservableObject {
     enum Page: String, CaseIterable, Identifiable {
-        case home, history, dictionary, style, shortcuts, settings, help
+        case home, history, dictionary, snippets, style, shortcuts, settings, help
         var id: String { rawValue }
         var title: String {
             switch self {
             case .home: "Home"
             case .history: "History"
             case .dictionary: "Dictionary"
+            case .snippets: "Snippets"
             case .style: "Writing Style"
             case .shortcuts: "Shortcuts"
             case .settings: "Settings"
@@ -25,13 +26,14 @@ final class HubModel: ObservableObject {
             case .home: "house"
             case .history: "clock"
             case .dictionary: "character.book.closed"
+            case .snippets: "text.insert"
             case .style: "textformat"
             case .shortcuts: "keyboard"
             case .settings: "gearshape"
             case .help: "questionmark.circle"
             }
         }
-        static let main: [Page] = [.home, .history, .dictionary, .style, .shortcuts]
+        static let main: [Page] = [.home, .history, .dictionary, .snippets, .style, .shortcuts]
         static let bottom: [Page] = [.settings, .help]
     }
 
@@ -48,6 +50,7 @@ final class HubModel: ObservableObject {
     @Published var styles: [StyleCategory: WritingStyle] = [:]
     let settings: SettingsModel
     let dictionary = DictionaryModel()
+    let snippets = SnippetsModel()
     let checkup = CheckupModel()
     let overlay: OverlayModel
     var onDemo: () -> Void = {}
@@ -69,6 +72,7 @@ final class HubModel: ObservableObject {
 
     func reload() {
         dictionary.load()
+        snippets.load()
         loadStyles()
         DispatchQueue.global(qos: .userInitiated).async {
             let list = History.recent(5000)
@@ -473,6 +477,7 @@ struct HubView: View {
         case .home: scroll(HomePage(m: m, overlay: m.overlay))
         case .history: HistoryPage(m: m, scrollable: scrollable)
         case .dictionary: scroll(DictionaryPage(d: m.dictionary, shortcuts: m.settings.shortcuts))
+        case .snippets: scroll(SnippetsPage(m: m.snippets))
         case .style: scroll(StylePage(m: m))
         case .shortcuts: scroll(ShortcutsTab(m: m.settings.shortcuts))
         case .settings: scroll(SettingsPage(s: m.settings, checkup: m.checkup))
