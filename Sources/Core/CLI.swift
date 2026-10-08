@@ -11,6 +11,7 @@ public enum WFCLI {
         if args.count >= 2, args[1] == "learn-e2e" { return learnE2E() }
         if args.count >= 2, args[1] == "shortcuts-test" { return shortcutsTest() }
         if args.count >= 2, args[1] == "snippets-test" { return snippetsTest() }
+        if args.count >= 2, args[1] == "duck-test" { return duckTest() }
         if args.count >= 3, args[1] == "render-shortcuts" { return renderShortcuts(args[2]) }
         if args.count >= 3, args[1] == "render-island" { return renderIsland(args[2]) }
         if args.count >= 3, args[1] == "live" { return liveTest(args[2]) }
@@ -378,6 +379,16 @@ public enum WFCLI {
             l.stop()
         }
         RunLoop.main.run(until: Date().addingTimeInterval(Double(pcm.count) / 32000 + 3.5))
+    }
+
+    /// ดูว่าลำโพงตอนนี้ปิดเสียงด้วยวิธีไหน + แอปที่กำลังส่งเสียง (ไม่เปลี่ยนเสียงเครื่อง)
+    static func duckTest() {
+        MainActor.assumeIsolated {
+            print(AudioDucker.describe())
+            for b in ["com.google.Chrome.helper", "com.spotify.client", "com.apple.WebKit.GPU", "us.zoom.xos", "com.kron.friday"] {
+                print("  \(b): \(AudioDucker.isMedia(b) ? "เพลง/วิดีโอ → หยุดได้" : "ไม่ยุ่ง")")
+            }
+        }
     }
 
     /// ทดสอบการขยายวลีลัด (ไม่แตะ snippets.json ของผู้ใช้)

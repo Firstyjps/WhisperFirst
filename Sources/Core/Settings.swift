@@ -32,6 +32,7 @@ final class SettingsModel: ObservableObject {
     @Published var useContext = Store.config.useContext { didSet { Store.update { $0.useContext = useContext } } }
     @Published var restoreClipboard = Store.config.restoreClipboard { didSet { Store.update { $0.restoreClipboard = restoreClipboard } } }
     @Published var noiseReduction = Store.config.noiseReduction { didSet { Store.update { $0.noiseReduction = noiseReduction } } }
+    @Published var muteWhileTalking = Store.config.muteWhileTalking { didSet { Store.update { $0.muteWhileTalking = muteWhileTalking } } }
     @Published var elevenLabsFallback = Store.config.elevenLabsFallback { didSet { Store.update { $0.elevenLabsFallback = elevenLabsFallback } } }
     /// เปิดตอนเข้าสู่ระบบ (SMAppService — ตัวเดียวกับในเมนู)
     @Published var loginItem = SMAppService.mainApp.status == .enabled {
@@ -143,8 +144,13 @@ struct SettingsPage: View {
                 divider
                 row("Play a sound when I start and stop") { toggle("Play a sound when I start and stop", $s.sounds) }
                 divider
-                row("Reduce background noise", "Cleans up a quiet or noisy mic · other audio gets a little quieter while you talk") {
+                row("Reduce background noise", "Cleans up a quiet or noisy mic") {
                     toggle("Reduce background noise", $s.noiseReduction)
+                }
+                divider
+                row("Music and videos while I talk", "Back when you let go · monitor speakers pause instead") {
+                    Segmented(items: [(AudioDucker.Mode.off, "Leave"), (.lower, "Lower"), (.mute, "Mute")],
+                              selection: s.muteWhileTalking, capsule: false, fontSize: 12.5) { s.muteWhileTalking = $0 }
                 }
             }
             section("Dynamic Island") {

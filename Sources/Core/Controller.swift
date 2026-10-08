@@ -22,6 +22,8 @@ final class Controller {
     private(set) var lastInput: DictationInput?
 
     private let recorder = Recorder()
+    private let ducker = AudioDucker()
+    private var duckWork: DispatchWorkItem?
     private let transcriber = Transcriber()
     lazy var learner = Learner(transcriber: transcriber)
     private var session: DictationSession?
@@ -213,6 +215,16 @@ final class Controller {
         s.ignoreNext(seconds: 0.3)   // เสียง Tink ของเราเองเข้าไมค์ → ไม่นับว่าเป็นเสียงพูด
         live?.muteNext(seconds: 0.3)   // …และไม่ส่งให้ Live ฟัง (คำแรกเพี้ยน)
         Sounds.play("Tink")
+        // ปิด/ลดเสียงเพลงหลังเสียง Tink เล่นจบ (ไม่งั้นเสียงเริ่มของเราก็เงียบไปด้วย)
+        let mode = Store.config.muteWhileTalking
+        if mode != .off {
+            let w = DispatchWorkItem { [weak self] in
+                guard let self, self.state == .recording, self.committed else { return }
+                self.ducker.duck(mode)
+            }
+            duckWork = w
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: w)
+        }
         transcriber.prewarm()
         if let key = Keys.gemini { live?.start(key: key) }
         // อ่านข้อความก่อนเคอร์เซอร์นอก main (AX อาจค้างได้ถึงวินาที) · ไม่อ่านใน terminal/ตัวจัดการรหัสผ่าน
@@ -224,7 +236,14 @@ final class Controller {
         }
     }
 
+    /// คืนเสียงลำโพง (ทุกทางที่จบการอัด)
+    func restoreAudio() {
+        duckWork?.cancel(); duckWork = nil
+        ducker.restore()
+    }
+
     func cancel(silent: Bool) {
+        restoreAudio()
         commitWork?.cancel()
         recorder.stop()
         session?.cancel()
@@ -244,6 +263,7 @@ final class Controller {
         guard state == .recording, let s = session else { return }
         commitWork?.cancel()
         if !committed { commit(app: nil) }
+        restoreAudio()   // ก่อนเสียง Pop
         session = nil
         live = nil     // session รอข้อความสุดท้ายจาก Live เอง (ข้อความยังไหลมาแสดงระหว่างเกลา)
         handsFree = false

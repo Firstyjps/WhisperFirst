@@ -93,6 +93,8 @@ struct Config: Codable {
     var restoreClipboard = true
     /// ลดเสียงรบกวนจากไมค์ด้วย voice processing ของ macOS (แอปอื่นเบาลงเล็กน้อยระหว่างพูด)
     var noiseReduction = true
+    /// ระหว่างพูด: ลดเสียง/ปิดเสียงลำโพง (เพลง วิดีโอ) แล้วคืนค่าเดิมตอนปล่อยปุ่ม · ลำโพงที่ปรับเสียงไม่ได้ → หยุดเพลงแทน
+    var muteWhileTalking: AudioDucker.Mode = .lower
     /// เก็บประวัติในเครื่อง · จำนวนวัน (0 = ตลอดไป)
     var keepHistory = true
     var historyDays = 30
@@ -127,6 +129,7 @@ struct Config: Codable {
         useContext = v(.useContext, d.useContext)
         restoreClipboard = v(.restoreClipboard, d.restoreClipboard)
         noiseReduction = v(.noiseReduction, d.noiseReduction)
+        muteWhileTalking = v(.muteWhileTalking, d.muteWhileTalking)
         keepHistory = v(.keepHistory, d.keepHistory)
         historyDays = v(.historyDays, d.historyDays)
         useSystemElevenLabsKey = v(.useSystemElevenLabsKey, d.useSystemElevenLabsKey)

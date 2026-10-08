@@ -182,6 +182,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         DispatchQueue.main.async { NSApp.setActivationPolicy(.accessory) }
     }
 
+    /// ปิดแอประหว่างพูด → คืนเสียงลำโพงก่อน
+    func applicationWillTerminate(_ n: Notification) { controller.restoreAudio() }
+
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         showHub()
         return false
