@@ -190,6 +190,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
 
 /// จุดเข้าของแอป — Sources/Launcher เรียกฟังก์ชันนี้
 public func whisperfirstMain() {
+    if CommandLine.arguments.contains("--mic-bench") { MicBench.run(); exit(0) }
     MainActor.assumeIsolated {
         let app = NSApplication.shared
         let delegate = AppDelegate()

@@ -108,8 +108,26 @@ enum Clean {
             let inner = t.dropFirst().dropLast()
             if !inner.contains(open) && !inner.contains(close) { t = String(inner) }
         }
-        for (from, to) in Prompt.dictionaryEntries().fixes { t = t.replacingOccurrences(of: from, with: to) }
+        for (from, to) in Prompt.dictionaryEntries().fixes { t = replace(t, from, to) }
         return t
+    }
+
+    /// แทนคำ + เว้นวรรคแบบไทยรอบคำอังกฤษ ("ให้คอร์สโค้ดทำ" → "ให้ Claude Code ทำ")
+    static func replace(_ text: String, _ from: String, _ to: String, caseInsensitive: Bool = false) -> String {
+        guard !from.isEmpty, let first = to.first, let last = to.last else { return text }
+        let latin: (Character) -> Bool = { $0.isASCII && ($0.isLetter || $0.isNumber) }
+        let thai: (Character) -> Bool = { $0.unicodeScalars.first.map { (0x0E00...0x0E7F).contains($0.value) } ?? false }
+        var out = text
+        var from0 = out.startIndex
+        while let r = out.range(of: from, options: caseInsensitive ? .caseInsensitive : [], range: from0..<out.endIndex) {
+            var v = to
+            if latin(first), r.lowerBound > out.startIndex, thai(out[out.index(before: r.lowerBound)]) { v = " " + v }
+            if latin(last), r.upperBound < out.endIndex, thai(out[r.upperBound]) { v += " " }
+            let at = out.distance(from: out.startIndex, to: r.lowerBound)
+            out.replaceSubrange(r, with: v)
+            from0 = out.index(out.startIndex, offsetBy: at + v.count)
+        }
+        return out
     }
 
     /// สำหรับผลถอดดิบ (ElevenLabs): ตัดคำเติม — ภาษาไทยไม่เว้นวรรค "เอ่อ/อืม" จึงมักติดคำถัดไป

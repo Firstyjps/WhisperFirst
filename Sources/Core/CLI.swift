@@ -327,7 +327,7 @@ public enum WFCLI {
                 ("ว่าง (จอไม่มีรอยบาก)", model { _ in }),
                 ("ชี้เมาส์", model { $0.phase = .hover }),
                 ("กำลังพูด (กดค้าง)", model { $0.phase = .listening }),
-                ("กำลังพูด + คำสด (แฮนด์ฟรี)", model { $0.phase = .listening; $0.handsFree = true; $0.liveText = "พรุ่งนี้ประชุมกับทีมตอน 10:30 น. นะ แล้วก็ฝากเตรียมสไลด์เรื่อง" }),
+                ("กำลังพูด + คำสด (แฮนด์ฟรี)", model { $0.phase = .listening; $0.handsFree = true; $0.setLive(stable: "พรุ่งนี้ประชุมกับทีมตอน 10:30 น. นะ แล้วก็", pending: "ฝากเตรียมสไลด์เรื่อง") }),
                 ("โหมดคำสั่ง", model { $0.phase = .listening; $0.command = true }),
                 ("กำลังเกลา", model { $0.phase = .thinking; $0.liveText = "พรุ่งนี้ประชุมกับทีมตอน 10:30 น. นะ แล้วก็ฝากเตรียมสไลด์เรื่อง funding dashboard ด้วย" }),
                 ("วางแล้ว", model { $0.phase = .done; $0.doneText = "พรุ่งนี้ประชุมกับทีมตอน 10 โมงครึ่งนะ แล้วก็ฝากเตรียม slide เรื่อง funding dashboard ด้วย" }),
@@ -360,7 +360,12 @@ public enum WFCLI {
         let l = LiveTranscriber()
         let t0 = Date()
         var last = ""
-        l.onText = { t in if t != last { last = t; print(String(format: "  %5.2fs  %@", Date().timeIntervalSince(t0), t)) } }
+        let display = LiveDisplay()
+        l.onText = { stable, pending in
+            let (a, b) = display.clean(stable: stable, pending: pending)
+            let t = [a, b].filter { !$0.isEmpty }.joined(separator: " ")
+            if t != last { last = t; print(String(format: "  %5.2fs  %@", Date().timeIntervalSince(t0), t)) }
+        }
         l.start(key: key)
         Task {
             var i = 0
@@ -375,7 +380,6 @@ public enum WFCLI {
         RunLoop.main.run(until: Date().addingTimeInterval(Double(pcm.count) / 32000 + 3.5))
     }
 
-    /// เรนเดอร์หน้าต่างหลักแต่ละหน้าเป็นภาพ (ใช้ข้อมูลจริง) → <prefix>-home.png ฯลฯ
     /// ทดสอบการขยายวลีลัด (ไม่แตะ snippets.json ของผู้ใช้)
     static func snippetsTest() {
         let list = [Snippet(trigger: "อีเมลงาน", text: "me@work.com"),
@@ -405,6 +409,7 @@ public enum WFCLI {
         if fail > 0 { exit(1) }
     }
 
+    /// เรนเดอร์หน้าต่างหลักแต่ละหน้าเป็นภาพ (ใช้ข้อมูลจริง) → <prefix>-home.png ฯลฯ
     static func renderHub(_ prefix: String) {
         MainActor.assumeIsolated {
             let h = HubModel(settings: SettingsModel(engine: ShortcutEngine()), overlay: OverlayModel())

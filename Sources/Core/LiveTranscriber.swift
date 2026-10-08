@@ -4,8 +4,8 @@ import Foundation
 /// Gemini Live `gemini-3.5-transcribe-live` ผ่าน WebSocket: ส่งเสียงทุก 100ms → ได้ข้อความสะสมกลับทุก ~0.5 วิ
 final class LiveTranscriber: NSObject {
     static let model = "gemini-3.5-transcribe-live"
-    /// ข้อความสะสมทั้งหมดจนถึงตอนนี้ — เรียกบน main thread
-    var onText: ((String) -> Void)?
+    /// ข้อความสะสมจนถึงตอนนี้ (ส่วนที่นิ่งแล้ว, ส่วนที่ยังเดาอยู่) — เรียกบน main thread
+    var onText: ((String, String) -> Void)?
     /// ทุกช่วงได้ฉบับสุดท้ายแล้วระหว่างที่ยังกดค้าง (ผู้ใช้หยุดพูด) → (ข้อความ, จำนวนช่วง, วินาทีที่พูดจริง) — เรียกบน q
     var onSettled: ((String, Int, Double?) -> Void)?
 
@@ -27,7 +27,6 @@ final class LiveTranscriber: NSObject {
     private var allFinal: Bool { finalsReceived >= segmentsStarted && interim.isEmpty }
     /// จำนวนช่วงที่ Live ตัด (อ่านหลัง finish) — หลายช่วง = พูดยาว/มีหยุด → ข้อความ Live เสี่ยงข้ามเนื้อหา
     var segments: Int { q.sync { segmentsStarted } }
-    private var full: String { (committed + (interim.isEmpty ? [] : [interim])).joined(separator: " ") }
     private var waiter: CheckedContinuation<String?, Never>?
     private(set) var failed = false
     /// เวลาในเสียง (วินาที) ที่เริ่มพูดช่วงแรก / จบช่วงล่าสุด — จาก voiceActivity.audioOffset
@@ -50,10 +49,22 @@ final class LiveTranscriber: NSObject {
         receive()
     }
 
+    /// เสียงที่ต้องปิดเป็นความเงียบ (เสียง Tink ของแอปเองตอนเริ่ม) — จำนวน byte ที่เหลือ
+    private var muteBytes = 0
+
+    /// ปิดเสียง N วินาทีถัดไปที่ส่งไป Live (แทนด้วยความเงียบ เวลาในเสียงยังตรงเดิม)
+    func muteNext(seconds: Double) { q.async { self.muteBytes = Int(seconds * 16000) * 2 } }
+
     /// เรียกจาก audio thread ได้
     func append(_ chunk: Data) {
         q.async {
             guard !self.finished else { return }
+            var chunk = chunk
+            if self.muteBytes > 0 {
+                let n = min(self.muteBytes, chunk.count)
+                chunk.replaceSubrange(0..<n, with: Data(count: n))
+                self.muteBytes -= n
+            }
             self.buffer.append(self.agc(chunk))
             if self.buffer.count >= 3200 { self.flush() }   // 100ms
         }
@@ -218,8 +229,30 @@ final class LiveTranscriber: NSObject {
             } else if let t = interimText, !isForeign(t) {
                 self.interim = t
             }
-            let text = self.full
-            if !text.isEmpty { DispatchQueue.main.async { self.onText?(text) } }
+            let stable = self.committed.joined(separator: " "), pending = self.interim
+            if !stable.isEmpty || !pending.isEmpty { DispatchQueue.main.async { self.onText?(stable, pending) } }
         }
     }
+}
+
+/// เกลาข้อความสดก่อนโชว์บนเกาะ (ไม่กระทบผลที่วางจริง)
+/// - ช่วงที่ไม่ใช่อักษรไทย/อังกฤษ (ไมค์เบา/เสียงรบกวน → Live เดาเป็นฮินดี/พม่า ฯลฯ) → ไม่โชว์
+/// - แก้คำตามพจนานุกรม (คู่แก้คำ => และคำที่เรียนรู้ ~>) — Live ไม่รู้จักพจนานุกรมของผู้ใช้
+struct LiveDisplay {
+    private let pairs: [(String, String)]
+
+    init(entries: (words: [String], fixes: [(String, String)], hints: [(String, String)]) = Prompt.dictionaryEntries()) {
+        pairs = (entries.fixes + entries.hints).filter { !$0.0.isEmpty }.sorted { $0.0.count > $1.0.count }
+    }
+
+    func clean(_ s: String) -> String {
+        let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.isEmpty, DictationSession.mostlyThaiOrLatin(t) else { return "" }
+        var out = t
+        for (from, to) in pairs { out = Clean.replace(out, from, to, caseInsensitive: true) }
+        return out
+    }
+
+    /// (ส่วนที่นิ่งแล้ว, ส่วนที่ยังเดาอยู่)
+    func clean(stable: String, pending: String) -> (String, String) { (clean(stable), clean(pending)) }
 }

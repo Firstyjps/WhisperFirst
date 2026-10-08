@@ -91,6 +91,8 @@ struct Config: Codable {
     /// ส่งข้อความก่อนเคอร์เซอร์ไปเป็นบริบท (ช่วยสะกดชื่อ/ต่อประโยค) — ช่องรหัสผ่านไม่ส่งเสมอ
     var useContext = true
     var restoreClipboard = true
+    /// ลดเสียงรบกวนจากไมค์ด้วย voice processing ของ macOS (แอปอื่นเบาลงเล็กน้อยระหว่างพูด)
+    var noiseReduction = true
     /// เก็บประวัติในเครื่อง · จำนวนวัน (0 = ตลอดไป)
     var keepHistory = true
     var historyDays = 30
@@ -124,6 +126,7 @@ struct Config: Codable {
         learnFromEdits = v(.learnFromEdits, d.learnFromEdits)
         useContext = v(.useContext, d.useContext)
         restoreClipboard = v(.restoreClipboard, d.restoreClipboard)
+        noiseReduction = v(.noiseReduction, d.noiseReduction)
         keepHistory = v(.keepHistory, d.keepHistory)
         historyDays = v(.historyDays, d.historyDays)
         useSystemElevenLabsKey = v(.useSystemElevenLabsKey, d.useSystemElevenLabsKey)

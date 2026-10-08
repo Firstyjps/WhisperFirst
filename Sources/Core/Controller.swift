@@ -49,6 +49,8 @@ final class Controller {
         shortcuts.onShift = { [weak self] in MainActor.assumeIsolated { self?.shiftPressed() } }
         shortcuts.onEscape = { [weak self] in MainActor.assumeIsolated { self?.escape() } }
         shortcuts.start()
+        recorder.voiceProcessing = Store.config.noiseReduction
+        recorder.prewarm()   // เปิดตัวลดเสียงรบกวนไว้ก่อน (~0.9 วิ) — กดพูดแล้วไมค์เปิดทันที
         recorder.onLevel = { [weak self] level in
             MainActor.assumeIsolated {
                 guard let self, self.state == .recording, self.committed else { return }
@@ -173,11 +175,16 @@ final class Controller {
         session = s
         // Live สร้างไว้ก่อน (เก็บเสียงช่วงแรกไว้ในบัฟเฟอร์) แต่เชื่อมต่อจริงตอน commit
         let lv: LiveTranscriber? = Store.config.liveTranscript && Keys.gemini != nil ? LiveTranscriber() : nil
-        lv?.onText = { [weak self] t in self?.overlay.liveText = t }
+        let display = LiveDisplay()
+        lv?.onText = { [weak self] stable, pending in
+            let (a, b) = display.clean(stable: stable, pending: pending)
+            self?.overlay.setLive(stable: a, pending: b)
+        }
         lv?.onSettled = { [weak s] text, segs, spoken in s?.liveSettled(text: text, segments: segs, spoken: spoken) }
         live = lv
         s.live = lv
         recorder.onChunk = { data, rms in s.append(data, rms: rms); lv?.append(data) }
+        recorder.voiceProcessing = Store.config.noiseReduction
         do { try recorder.start() } catch {
             session = nil; live = nil
             overlay.flash("Couldn't open microphone: \(error.localizedDescription)")
@@ -204,6 +211,7 @@ final class Controller {
         overlay.listening(command: commandMode, icon: app?.icon)
         if handsFree { overlay.handsFree = true }
         s.ignoreNext(seconds: 0.3)   // เสียง Tink ของเราเองเข้าไมค์ → ไม่นับว่าเป็นเสียงพูด
+        live?.muteNext(seconds: 0.3)   // …และไม่ส่งให้ Live ฟัง (คำแรกเพี้ยน)
         Sounds.play("Tink")
         transcriber.prewarm()
         if let key = Keys.gemini { live?.start(key: key) }

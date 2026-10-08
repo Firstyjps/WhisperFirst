@@ -15,7 +15,15 @@ final class OverlayModel: ObservableObject {
     @Published var command = false
     @Published var handsFree = false
     @Published var message = ""
+    /// ข้อความสดทั้งหมด (ใช้คำนวณขนาดเกาะ) · ส่วนท้ายที่ยังเดาอยู่ (โชว์จางกว่า)
     @Published var liveText = ""
+    @Published var livePending = ""
+
+    func setLive(stable: String, pending: String) {
+        let full = [stable, pending].filter { !$0.isEmpty }.joined(separator: " ")
+        if livePending != pending { livePending = pending }
+        if liveText != full { liveText = full }
+    }
     @Published var doneText = ""
     @Published var learnedWord = ""
     @Published var appIcon: NSImage?
@@ -54,6 +62,7 @@ final class OverlayModel: ObservableObject {
         demoToken += 1   // การพูดจริงตัด demo ทิ้งเสมอ
         meter.reset()
         liveText = ""
+        livePending = ""
         appIcon = icon
         startedAt = Date()
         self.command = command
@@ -83,7 +92,8 @@ final class OverlayModel: ObservableObject {
                 tick += 1
                 self.push(level: Float.random(in: 0.004...0.12) * Float(abs(sin(Double(tick) / 5)) + 0.3))
                 if tick % 5 == 0, tick / 5 <= words.count {
-                    self.liveText = words.prefix(tick / 5).joined(separator: " ")
+                    let n = tick / 5   // คำล่าสุดยังจาง (กำลังเดา) เหมือนของจริง
+                    self.setLive(stable: words.prefix(max(0, n - 1)).joined(separator: " "), pending: n > 0 ? words[n - 1] : "")
                 }
                 if tick >= words.count * 5 + 14 {
                     t.invalidate()
@@ -136,6 +146,13 @@ final class OverlayModel: ObservableObject {
 }
 
 struct IslandView: View {
+    /// ส่วนที่นิ่งแล้วสีขาว · ส่วนที่ Live ยังเดาอยู่ (อาจเปลี่ยน) จางกว่า
+    private var liveLine: Text {
+        let p = m.livePending, full = m.liveText
+        let stable = !p.isEmpty && full.hasSuffix(p) ? String(full.dropLast(p.count)) : full
+        return Text(stable).foregroundColor(.white.opacity(0.9)) + Text(stable == full ? "" : p).foregroundColor(.white.opacity(0.5))
+    }
+
     @ObservedObject var m: OverlayModel
     static let canvas = CGSize(width: 640, height: 150)
     private let spring = Animation.spring(response: 0.42, dampingFraction: 0.8)
@@ -209,10 +226,9 @@ struct IslandView: View {
                     }
                 }
                 if !m.liveText.isEmpty {
-                    Text(m.liveText)
+                    liveLine
                         .font(.system(size: 13))
                         .lineLimit(1).truncationMode(.head)
-                        .foregroundStyle(.white.opacity(0.78))
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .mask(HStack(spacing: 0) {   // ข้อความยาวเกิน → จางขอบซ้าย 40pt
                             if m.liveText.count > 48 { LinearGradient(colors: [.clear, .black], startPoint: .leading, endPoint: .trailing).frame(width: 40) }
