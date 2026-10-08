@@ -35,9 +35,14 @@ final class HubModel: ObservableObject {
         static let bottom: [Page] = [.settings, .help]
     }
 
-    @Published var page: Page = .home
-    @Published var entries: [HistoryEntry] = []
-    @Published var search = ""
+    @Published var page: Page = .home {
+        didSet { if page != oldValue { settings.shortcuts.cancelRecording() } }   // ออกจากหน้า Shortcuts = เลิกอัด
+    }
+    @Published var entries: [HistoryEntry] = [] { didSet { regroup(); recomputeStats() } }
+    @Published var search = "" { didSet { regroup() } }
+    /// คำนวณครั้งเดียวเมื่อประวัติเปลี่ยน (ไม่ใช่ทุก render) — ตัดคำทั้งประวัติใช้เวลาหลายร้อย ms
+    @Published private(set) var stats = Stats()
+    @Published private(set) var grouped: [(id: Date, label: String, items: [HistoryEntry])] = []
     @Published var copiedID: Double?
     @Published var styleTab: StyleCategory = .personal
     @Published var styles: [StyleCategory: WritingStyle] = [:]
@@ -52,16 +57,23 @@ final class HubModel: ObservableObject {
         self.settings = settings
         self.overlay = overlay
         loadStyles()
-        // พูดเสร็จ → ประวัติใหม่ขึ้นทันทีใน Home/History
-        observer = NotificationCenter.default.addObserver(forName: History.changed, object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.entries = History.recent(5000) }
+        // พูดเสร็จ → แทรกรายการใหม่เข้าหัวรายการเลย (ไม่อ่านไฟล์ทั้งก้อนบน main)
+        observer = NotificationCenter.default.addObserver(forName: History.changed, object: nil, queue: .main) { [weak self] n in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                if let e = n.object as? HistoryEntry { if !self.entries.contains(where: { $0.t == e.t }) { self.entries.insert(e, at: 0) } }
+                else { self.reload() }
+            }
         }
     }
 
     func reload() {
-        entries = History.recent(5000)
         dictionary.load()
         loadStyles()
+        DispatchQueue.global(qos: .userInitiated).async {
+            let list = History.recent(5000)
+            DispatchQueue.main.async { self.entries = list }
+        }
     }
 
     private func loadStyles() {
@@ -89,38 +101,49 @@ final class HubModel: ObservableObject {
 
     struct Stats { var words = 0; var savedMinutes = 0; var streak = 0 }
 
-    var stats: Stats {
-        var s = Stats()
-        var spoken = 0.0, ms = 0
-        for e in entries { s.words += Self.wordCount(e.text); spoken += e.sec; ms += e.ms }
-        // พิมพ์เฉลี่ย ~35 คำ/นาที vs เวลาพูด + รอผล
-        s.savedMinutes = max(0, Int((Double(s.words) / 35 * 60 - spoken - Double(ms) / 1000) / 60))
-        let cal = Calendar.current
-        let days = Set(entries.map { cal.startOfDay(for: Date(timeIntervalSince1970: $0.t)) })
-        var d = cal.startOfDay(for: Date())
-        if !days.contains(d) { d = cal.date(byAdding: .day, value: -1, to: d)! }
-        while days.contains(d) { s.streak += 1; d = cal.date(byAdding: .day, value: -1, to: d)! }
-        return s
+    private var statsGeneration = 0
+
+    private func recomputeStats() {
+        statsGeneration += 1
+        let gen = statsGeneration, list = entries
+        DispatchQueue.global(qos: .utility).async {
+            var s = Stats()
+            var spoken = 0.0, ms = 0
+            for e in list { s.words += Self.wordCount(e.text); spoken += e.sec; ms += e.ms }
+            // พิมพ์เฉลี่ย ~35 คำ/นาที vs เวลาพูด + รอผล
+            s.savedMinutes = max(0, Int((Double(s.words) / 35 * 60 - spoken - Double(ms) / 1000) / 60))
+            let cal = Calendar.current
+            let days = Set(list.map { cal.startOfDay(for: Date(timeIntervalSince1970: $0.t)) })
+            var d = cal.startOfDay(for: Date())
+            if !days.contains(d) { d = cal.date(byAdding: .day, value: -1, to: d)! }
+            while days.contains(d) { s.streak += 1; d = cal.date(byAdding: .day, value: -1, to: d)! }
+            DispatchQueue.main.async { if gen == self.statsGeneration { self.stats = s } }
+        }
     }
 
-    static func wordCount(_ s: String) -> Int {
+    nonisolated     static func wordCount(_ s: String) -> Int {
         EditDiff.tokens(s).filter { $0.rangeOfCharacter(from: .alphanumerics) != nil }.count
     }
 
-    /// ประวัติแบ่งตามวัน (กรองด้วยคำค้น)
-    var grouped: [(String, [HistoryEntry])] {
+    /// ประวัติแบ่งตามวัน (กรองด้วยคำค้น) — id = วันจริง (กันวันเดียวกันต่างปีชนกัน)
+    private func regroup() {
         let q = search.trimmingCharacters(in: .whitespaces)
         let list = q.isEmpty ? entries : entries.filter { $0.text.localizedCaseInsensitiveContains(q) || $0.app.localizedCaseInsensitiveContains(q) }
         let cal = Calendar.current
-        var out: [(String, [HistoryEntry])] = []
+        let thisYear = cal.component(.year, from: Date())
+        var out: [(id: Date, label: String, items: [HistoryEntry])] = []
         for e in list {
             let d = Date(timeIntervalSince1970: e.t)
-            let label = cal.isDateInToday(d) ? "Today" : cal.isDateInYesterday(d) ? "Yesterday" : Self.dayFmt.string(from: d)
-            if out.last?.0 == label { out[out.count - 1].1.append(e) } else { out.append((label, [e])) }
+            let day = cal.startOfDay(for: d)
+            if out.last?.id == day { out[out.count - 1].items.append(e); continue }
+            let label = cal.isDateInToday(d) ? "Today" : cal.isDateInYesterday(d) ? "Yesterday"
+                : (cal.component(.year, from: d) == thisYear ? Self.dayFmt : Self.dayYearFmt).string(from: d)
+            out.append((day, label, [e]))
         }
-        return out
+        grouped = out
     }
 
+    static let dayYearFmt: DateFormatter = { let f = DateFormatter(); f.locale = Locale(identifier: "en_US"); f.dateFormat = "EEEE, MMMM d, yyyy"; return f }()
     static let dayFmt: DateFormatter = { let f = DateFormatter(); f.locale = Locale(identifier: "en_US"); f.dateFormat = "EEEE, MMMM d"; return f }()
     static let timeFmt: DateFormatter = { let f = DateFormatter(); f.locale = Locale(identifier: "en_US"); f.dateFormat = "h:mm a"; return f }()
 
@@ -143,9 +166,12 @@ final class CheckupModel: ObservableObject {
 
     var allGood: Bool { mic && typing && online }
 
+    /// เปิดหน้า Settings: ตรวจไมค์/สิทธิ์ในเครื่องทุกครั้ง · ทดสอบการเชื่อมต่อ (ยิง API) เฉพาะครั้งแรกหรือเกิน 10 นาที
     func runIfStale() {
         if state == .checking { return }
-        if let t = checkedAt, Date().timeIntervalSince(t) < 60 { return }
+        mic = AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
+        typing = AX.trusted
+        if let t = checkedAt, Date().timeIntervalSince(t) < 600 { return }
         run()
     }
 
@@ -199,10 +225,20 @@ final class DictionaryModel: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { if self.justAdded == w { self.justAdded = nil } }
     }
 
+    /// ลบบรรทัด — เทียบแบบแยกคู่ (ทนช่องว่างที่ผู้ใช้พิมพ์เองในโหมดข้อความ เช่น "a=>b" / "a  =>  b")
     func remove(line: String) {
         guard let s = try? String(contentsOf: Paths.dictionary, encoding: .utf8) else { return }
         var lines = s.components(separatedBy: "\n")
-        if let i = lines.firstIndex(where: { $0.trimmingCharacters(in: .whitespaces) == line }) { lines.remove(at: i) }
+        let norm: (String) -> String = { l in
+            var t = l.trimmingCharacters(in: .whitespaces)
+            for sep in ["=>", "~>"] where t.contains(sep) {
+                let parts = t.components(separatedBy: sep).map { $0.trimmingCharacters(in: .whitespaces) }
+                t = parts.joined(separator: " \(sep) ")
+            }
+            return t
+        }
+        let target = norm(line)
+        if let i = lines.firstIndex(where: { norm($0) == target }) { lines.remove(at: i) }
         try? lines.joined(separator: "\n").write(to: Paths.dictionary, atomically: true, encoding: .utf8)
         load()
     }
@@ -249,9 +285,10 @@ enum Theme {
     static let card = Color.white
     static let ink = Color(hex: 0x2B2620)
     static let inkSecondary = Color(hex: 0x4A433C)
-    static let muted = Color(hex: 0x8A8178)
-    static let muted2 = Color(hex: 0x9A9187)
-    static let faint = Color(hex: 0xA39A90)
+    // เข้มกว่า handoff เล็กน้อยเพื่อ contrast ≥4.5:1 (เดิม 2.6–3.6:1)
+    static let muted = Color(hex: 0x6F665D)
+    static let muted2 = Color(hex: 0x776E65)
+    static let faint = Color(hex: 0x857B71)
     static let hoverRow = Color(hex: 0xF7F2EC)
     static let chip = Color(hex: 0xF6F2EC)
     static let pillBtn = Color(hex: 0xF3EEE8)
@@ -360,7 +397,7 @@ struct PrimaryButtonStyle: ButtonStyle {
         configuration.label
             .font(.system(size: 13, weight: .semibold)).foregroundStyle(.white)
             .padding(.horizontal, 16).padding(.vertical, 7)
-            .background(Capsule().fill(configuration.isPressed ? Theme.accentPressed : Theme.accent))
+            .background(Capsule().fill(configuration.isPressed ? Color(hex: 0xA44F18) : Theme.accentPressed))   // ตัวขาวบนส้มเข้มขึ้น อ่านง่ายกว่า
             .opacity(enabled ? 1 : 0.45)
     }
 }
@@ -393,7 +430,8 @@ struct AppBadge: View {
     }
     static func color(_ app: String) -> Color {
         let palette: [UInt32] = [0x7A5AA6, 0x22A447, 0x2F7FF0, 0xD9A20B, 0x2FA851, 0xC96A48]
-        return Color(hex: palette[abs(app.hashValue) % palette.count])
+        let h = app.unicodeScalars.reduce(0) { ($0 &* 31 &+ Int($1.value)) & 0xFFFFFF }   // คงที่ข้ามการเปิดแอป (hashValue สุ่มทุก process)
+        return Color(hex: palette[h % palette.count])
     }
 }
 
@@ -503,7 +541,9 @@ private struct HomePage: View {
                     .font(.system(size: 14)).foregroundStyle(Theme.muted2)
                     .frame(maxWidth: .infinity).padding(.vertical, 26).wfCard()
             } else {
-                VStack(spacing: 0) { ForEach(m.entries.prefix(3)) { EntryRow(m: m, e: $0, wrap: false, deletable: false) } }
+                VStack(spacing: 0) {
+                    ForEach(m.entries.prefix(3)) { e in EntryRow(e: e, wrap: false, deletable: false, copied: m.copiedID == e.id) { m.copy(e) } }
+                }
                     .padding(6).wfCard()
             }
         }
@@ -602,14 +642,15 @@ private struct BigKeycap: View {
 
 /// แถวประวัติ (Home: บรรทัดเดียว · History: ข้อความเต็ม + ปุ่มลบ)
 struct EntryRow: View {
-    @ObservedObject var m: HubModel
     let e: HistoryEntry
     let wrap: Bool
     let deletable: Bool
+    let copied: Bool
+    let onCopy: () -> Void
+    var onDelete: () -> Void = {}
     @StateObject private var hover = HoverState()
 
     var body: some View {
-        let copied = m.copiedID == e.id
         HStack(alignment: wrap ? .top : .center, spacing: 14) {
             AppBadge(app: e.app, bundle: e.bundle)
             VStack(alignment: .leading, spacing: 3) {
@@ -622,19 +663,20 @@ struct EntryRow: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             HStack(spacing: 8) {
-                Button { m.copy(e) } label: {
+                Button { onCopy() } label: {
                     Label(copied ? "Copied" : "Copy", systemImage: copied ? "checkmark" : "doc.on.doc")
                 }
                 .buttonStyle(PillButtonStyle())
+                .accessibilityLabel(copied ? "Copied" : "Copy text")
                 if deletable {
-                    Button { m.delete(e) } label: {
+                    Button { onDelete() } label: {
                         Image(systemName: "trash").font(.system(size: 12)).foregroundStyle(Theme.muted)
                             .frame(width: 30, height: 30).background(Circle().fill(Theme.pillBtn))
                     }
-                    .buttonStyle(.plain).help("Delete")
+                    .buttonStyle(.plain).help("Delete").accessibilityLabel("Delete from history")
                 }
             }
-            .opacity(hover.on || copied ? 1 : 0)
+            .opacity(hover.on || copied ? 1 : 0.001)   // ซ่อนด้วยตา แต่ยังกดผ่านคีย์บอร์ด/VoiceOver ได้
             .animation(.easeOut(duration: 0.15), value: hover.on)
         }
         .padding(.horizontal, 14).padding(.vertical, 11)
@@ -670,17 +712,21 @@ private struct HistoryPage: View {
 
     private var list: some View {
         let groups = m.grouped
-        return VStack(alignment: .leading, spacing: 18) {
+        return LazyVStack(alignment: .leading, spacing: 18) {
             if groups.isEmpty {
                 Text(m.search.isEmpty ? "Nothing here yet — hold the key and say something." : "Nothing matches \"\(m.search)\" yet")
                     .font(.system(size: 14)).foregroundStyle(Theme.muted2)
                     .frame(maxWidth: .infinity).padding(.top, 40)
             }
-            ForEach(groups, id: \.0) { day, items in
+            ForEach(groups, id: \.id) { g in
                 VStack(alignment: .leading, spacing: 10) {
-                    Text(day).font(Theme.rounded(15, .semibold)).padding(.leading, 4)
-                    VStack(spacing: 0) { ForEach(items) { EntryRow(m: m, e: $0, wrap: true, deletable: true) } }
-                        .padding(6).wfCard()
+                    Text(g.label).font(Theme.rounded(15, .semibold)).padding(.leading, 4)
+                    LazyVStack(spacing: 0) {
+                        ForEach(g.items) { e in
+                            EntryRow(e: e, wrap: true, deletable: true, copied: m.copiedID == e.id, onCopy: { m.copy(e) }, onDelete: { m.delete(e) })
+                        }
+                    }
+                    .padding(6).wfCard()
                 }
             }
         }

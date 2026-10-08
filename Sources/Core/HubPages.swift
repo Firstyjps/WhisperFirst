@@ -289,7 +289,8 @@ private struct AboutEditor: View {
             .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Theme.card))
             .wfOutline(16)
             .onAppear { m.load() }
-            .onChange(of: m.text) { _ in m.save() }
+            .onChange(of: m.text) { _, _ in m.saveSoon() }
+            .onDisappear { m.save() }
     }
 }
 

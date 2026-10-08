@@ -10,7 +10,8 @@ final class OverlayModel: ObservableObject {
     static let bars = 26
 
     @Published var phase: Phase = .idle
-    @Published var levels: [CGFloat] = Array(repeating: 0, count: OverlayModel.bars)
+    /// ระดับเสียงแยกเป็น object ของตัวเอง → อัปเดต 30 ครั้ง/วิ แต่มีแค่คลื่นเสียงที่วาดใหม่ (เกาะทั้งก้อน/หน้า Home ไม่วาดตาม)
+    let meter = LevelMeter()
     @Published var command = false
     @Published var handsFree = false
     @Published var message = ""
@@ -45,8 +46,13 @@ final class OverlayModel: ObservableObject {
         }
     }
 
+    private var demoToken = 0
+    /// เวลาที่เริ่มชี้เมาส์ค้างบนเกาะ — คลิกได้เมื่อชี้ค้าง ≥0.3 วิ (กันคลิกโดนตอนจะกดเมนูบาร์)
+    private(set) var hoverSince = Date.distantFuture
+
     func listening(command: Bool, icon: NSImage? = nil) {
-        levels = Array(repeating: 0, count: Self.bars)
+        demoToken += 1   // การพูดจริงตัด demo ทิ้งเสมอ
+        meter.reset()
         liveText = ""
         appIcon = icon
         startedAt = Date()
@@ -55,13 +61,7 @@ final class OverlayModel: ObservableObject {
         set(.listening)
     }
 
-    func push(level: Float) {
-        // เสียงพูดปกติ RMS ~0.02–0.2 → ขยายแบบ log ให้เห็นชัด
-        let target = CGFloat(max(0, min(1, (log10(max(level, 0.0005)) + 3.0) / 2.3)))
-        let v = (levels.last ?? 0) * 0.35 + target * 0.65   // นุ่มขึ้น ไม่กระตุก
-        levels.removeFirst()
-        levels.append(v)
-    }
+    func push(level: Float) { meter.push(level) }
 
     func thinking(command: Bool) { self.command = command; set(.thinking) }
     func flash(_ text: String, seconds: Double = 2.2) { message = text; set(.message, after: seconds) }
@@ -75,10 +75,11 @@ final class OverlayModel: ObservableObject {
         guard phase == .idle || phase == .hover else { return }
         let words = ["พรุ่งนี้", "ประชุม", "กับ", "ทีม", "ตอน", "10:30", "น.", "นะ", "แล้วก็", "ฝาก", "เตรียม", "slide", "เรื่อง", "funding", "dashboard", "ด้วย"]
         listening(command: false, icon: NSWorkspace.shared.icon(forFile: "/System/Applications/Notes.app"))
+        let token = demoToken
         var tick = 0
         Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] t in
             MainActor.assumeIsolated {
-                guard let self, self.phase == .listening else { t.invalidate(); return }
+                guard let self, self.phase == .listening, self.demoToken == token else { t.invalidate(); return }
                 tick += 1
                 self.push(level: Float.random(in: 0.004...0.12) * Float(abs(sin(Double(tick) / 5)) + 0.3))
                 if tick % 5 == 0, tick / 5 <= words.count {
@@ -88,6 +89,7 @@ final class OverlayModel: ObservableObject {
                     t.invalidate()
                     self.thinking(command: false)
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) {
+                        guard self.demoToken == token, self.phase == .thinking else { return }
                         self.done("พรุ่งนี้ประชุมกับทีมตอน 10 โมงครึ่งนะ แล้วก็ฝากเตรียม slide เรื่อง funding dashboard ด้วย")
                     }
                 }
@@ -96,7 +98,14 @@ final class OverlayModel: ObservableObject {
     }
 
     func hover(_ inside: Bool) {
-        if inside && phase == .idle { set(.hover) } else if !inside && phase == .hover { set(.idle) }
+        if inside && phase == .idle { hoverSince = Date(); set(.hover) }
+        else if !inside && phase == .hover { hoverSince = .distantFuture; set(.idle) }
+    }
+
+    /// คลิกเกาะเพื่อเริ่มแฮนด์ฟรี — ต้องชี้ค้างให้เห็นคำแนะนำก่อน
+    func clickToStart() {
+        guard phase == .hover, Date().timeIntervalSince(hoverSince) >= 0.3 else { return }
+        onStart()
     }
 
     /// ขนาดของเกาะ (ไม่รวมส่วนที่ซ่อนใต้รอยบาก)
@@ -121,7 +130,7 @@ final class OverlayModel: ObservableObject {
     var outerSize: CGSize {
         let s = size
         let notched = top && notchWidth > 0
-        if phase == .idle && !showIdle && !notched { return .zero }
+        if phase == .idle && !showIdle { return .zero }   // ปิดเกาะตอนว่าง = ไม่รับ hover/คลิกแม้บนรอยบาก
         return CGSize(width: max(s.width, notched ? notchWidth : 0), height: s.height + (top ? topInset : 0))
     }
 }
@@ -161,7 +170,7 @@ struct IslandView: View {
             }
             .frame(width: outer.width + shoulder * 2, height: outer.height)
             .contentShape(Rectangle())
-            .onTapGesture { if m.phase == .idle || m.phase == .hover { m.onStart() } }
+            .onTapGesture { m.clickToStart() }
         }
         .frame(width: Self.canvas.width, height: Self.canvas.height)
         .animation(spring, value: m.phase)
@@ -186,7 +195,7 @@ struct IslandView: View {
             VStack(spacing: 6) {
                 HStack(spacing: 10) {
                     appBadge
-                    Waveform(levels: m.levels, command: m.command)
+                    Waveform(meter: m.meter, command: m.command)
                         .frame(maxWidth: .infinity)
                     if m.command { badge("Command", .orange) }
                     if m.handsFree { badge("Hands-free", .blue) }
@@ -195,8 +204,8 @@ struct IslandView: View {
                             .font(.system(size: 12, weight: .medium, design: .monospaced)).foregroundStyle(.white.opacity(0.6))
                     }
                     if m.handsFree {
-                        IslandButton(symbol: "xmark", fill: .white.opacity(0.16), hoverFill: .white.opacity(0.26)) { m.onCancel() }
-                        IslandButton(symbol: "checkmark", fill: Color(red: 0.949, green: 0.349, blue: 0.4), hoverFill: Color(red: 1, green: 0.42, blue: 0.47)) { m.onStop() }
+                        IslandButton(symbol: "xmark", label: "Cancel", fill: .white.opacity(0.16), hoverFill: .white.opacity(0.26)) { m.onCancel() }
+                        IslandButton(symbol: "checkmark", label: "Done", fill: Color(red: 0.949, green: 0.349, blue: 0.4), hoverFill: Color(red: 1, green: 0.42, blue: 0.47)) { m.onStop() }
                     }
                 }
                 if !m.liveText.isEmpty {
@@ -293,27 +302,56 @@ struct IslandView: View {
     }
 }
 
-/// คลื่นเสียง: ไล่สีต่อเนื่องเส้นเดียวทั้งแถบ (#FF944D → #ED408C) mask ด้วยแท่ง · จางขอบซ้าย
+/// ระดับเสียงสำหรับคลื่น — รับทุก ~21ms แต่ publish ไม่เกิน 30 ครั้ง/วิ
+@MainActor
+final class LevelMeter: ObservableObject {
+    @Published private(set) var levels: [CGFloat] = Array(repeating: 0, count: OverlayModel.bars)
+    private var last = Date.distantPast
+    private var peak: CGFloat = 0
+
+    func reset() { levels = Array(repeating: 0, count: OverlayModel.bars); peak = 0 }
+
+    func push(_ level: Float) {
+        // เสียงพูดปกติ RMS ~0.02–0.2 → ขยายแบบ log ให้เห็นชัด
+        let target = CGFloat(max(0, min(1, (log10(max(level, 0.0005)) + 3.0) / 2.3)))
+        peak = max(peak, target)
+        guard Date().timeIntervalSince(last) >= 1.0 / 30 else { return }
+        last = Date()
+        var l = levels
+        let v = (l.last ?? 0) * 0.35 + peak * 0.65   // นุ่มขึ้น ไม่กระตุก
+        l.removeFirst()
+        l.append(v)
+        peak = 0
+        levels = l
+    }
+
+    func set(_ l: [CGFloat]) { levels = l }   // ใช้ตอนเรนเดอร์ภาพทดสอบ
+}
+
+/// คลื่นเสียง: ไล่สีต่อเนื่องเส้นเดียวทั้งแถบ (#FF944D → #ED408C) · วาดด้วย Canvas (ไม่มี animation ซ้อนต่อแท่ง) · จางขอบซ้าย
 private struct Waveform: View {
-    let levels: [CGFloat]
+    @ObservedObject var meter: LevelMeter
     let command: Bool
     var body: some View {
-        Rectangle()
-            .fill(command
-                  ? AnyShapeStyle(Color(red: 1, green: 0.62, blue: 0.04))
-                  : AnyShapeStyle(LinearGradient(colors: [Color(red: 1, green: 0.58, blue: 0.30), Color(red: 0.93, green: 0.25, blue: 0.55)],
-                                                 startPoint: .leading, endPoint: .trailing)))
-            .mask(
-                HStack(alignment: .center, spacing: 2.5) {
-                    ForEach(Array(levels.enumerated()), id: \.offset) { _, v in
-                        Capsule().frame(width: 3, height: 3 + v * 22)
-                    }
-                }
-                .animation(.linear(duration: 0.1), value: levels)
-            )
-            .mask(LinearGradient(stops: [.init(color: .black.opacity(0.25), location: 0), .init(color: .black, location: 0.55)],
-                                 startPoint: .leading, endPoint: .trailing))
-            .frame(width: CGFloat(levels.count) * 5.5, height: 26)
+        let levels = meter.levels
+        Canvas { ctx, size in
+            var path = Path()
+            let step: CGFloat = 5.5
+            for (i, v) in levels.enumerated() {
+                let h = 3 + v * 22
+                path.addRoundedRect(in: CGRect(x: CGFloat(i) * step, y: (size.height - h) / 2, width: 3, height: h),
+                                    cornerSize: CGSize(width: 1.5, height: 1.5))
+            }
+            let shading: GraphicsContext.Shading = command
+                ? .color(Color(red: 1, green: 0.62, blue: 0.04))
+                : .linearGradient(Gradient(colors: [Color(red: 1, green: 0.58, blue: 0.30), Color(red: 0.93, green: 0.25, blue: 0.55)]),
+                                  startPoint: .zero, endPoint: CGPoint(x: size.width, y: 0))
+            ctx.fill(path, with: shading)
+        }
+        .mask(LinearGradient(stops: [.init(color: .black.opacity(0.25), location: 0), .init(color: .black, location: 0.55)],
+                             startPoint: .leading, endPoint: .trailing))
+        .frame(width: CGFloat(levels.count) * 5.5, height: 26)
+        .accessibilityHidden(true)
     }
 }
 
@@ -356,6 +394,7 @@ private struct BlurModifier: ViewModifier {
 /// ปุ่มวงกลม 22pt บนเกาะ: hover สว่างขึ้น · กดยุบ 0.9
 private struct IslandButton: View {
     let symbol: String
+    let label: String
     let fill: Color
     let hoverFill: Color
     let action: () -> Void
@@ -369,6 +408,7 @@ private struct IslandButton: View {
         }
         .buttonStyle(PressScale())
         .onHover { hover.on = $0 }
+        .accessibilityLabel(label)
     }
 }
 
@@ -483,8 +523,9 @@ final class OverlayPanel {
         if model.topInset != inset { model.topInset = inset }
         let c = IslandView.canvas
         let y = model.top ? s.frame.maxY - c.height : s.visibleFrame.minY + 10
-        panel.setFrame(NSRect(x: s.frame.midX - c.width / 2, y: y, width: c.width, height: c.height), display: true)
-        panel.orderFrontRegardless()
+        let frame = NSRect(x: s.frame.midX - c.width / 2, y: y, width: c.width, height: c.height)
+        if panel.frame != frame { panel.setFrame(frame, display: true) }   // ไม่วาดใหม่ทุก 2 วิถ้าไม่มีอะไรเปลี่ยน
+        if !panel.isVisible { panel.orderFrontRegardless() }
     }
 
     /// เมาส์อยู่บนตัวเกาะ → รับคลิก + ขยายบอกวิธีใช้ · นอกเกาะ → คลิกทะลุไปแอปข้างหลัง
