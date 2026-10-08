@@ -94,18 +94,16 @@ final class AudioDucker {
         Self.sendPlayPause()
         paused = media
         Log.write("audio: หยุดเพลงชั่วคราว \(media.sorted())")
-        // ยืนยันผล: แอปหยุดจริงไหม · ถ้ามีแอปเพลงอื่นดังขึ้นมาแทน (ปุ่มไปโดนแอปผิด) → กดคืนทันที
+        // ตรวจซ้ำ: มีแอปเพลงอื่นดังขึ้นมาแทน (ปุ่มไปโดนแอปผิด) → กดคืนทันที
         let w = DispatchWorkItem { [weak self] in
             guard let self, self.paused != nil else { return }
             self.pauseCheck = nil
             let now = Self.outputtingApps()
             let started = now.filter(Self.isMedia).subtracting(before)
+            // ไม่ใช้ "ยังส่งเสียงอยู่ไหม" ตัดสินว่าหยุดสำเร็จ: เบราว์เซอร์เปิดช่องเสียงค้างไว้แม้ pause แล้ว
             if !started.isEmpty {
                 Self.sendPlayPause(); self.paused = nil
                 Log.write("audio: ปุ่ม play/pause ไปโดนแอปอื่น → กดคืน")
-            } else if media.isSubset(of: now) {
-                self.paused = nil   // หยุดไม่ได้ (แอปไม่รับปุ่มนี้) → ตอนปล่อยปุ่มไม่ต้องกดเล่นต่อ
-                Log.write("audio: กด play/pause แล้วเพลงไม่หยุด → ไม่กดเล่นต่อ")
             }
         }
         pauseCheck = w
@@ -114,10 +112,8 @@ final class AudioDucker {
 
     private func resumeMedia() {
         pauseCheck?.cancel(); pauseCheck = nil
-        guard let media = paused else { return }
+        guard paused != nil else { return }
         paused = nil
-        // ผู้ใช้กดเล่นต่อเองแล้ว / ปุ่มยังไม่ทันได้ผล → ไม่กดซ้ำ
-        guard Self.outputtingApps().isDisjoint(with: media) else { return }
         Self.sendPlayPause()
         Log.write("audio: เล่นเพลงต่อ")
     }
