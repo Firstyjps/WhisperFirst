@@ -22,6 +22,7 @@ cp prompts/*.md "$SUPPORT/prompts/"
 [[ -f "$SUPPORT/about-me.md" ]] || cp defaults/about-me.md "$SUPPORT/about-me.md"
 # API key: ใส่ในแอป (Settings → Models & API keys) หรือ export GEMINI_API_KEY ก่อนรัน build ครั้งแรก
 if [[ ! -f "$SUPPORT/.env" ]]; then
+  umask 077   # ไฟล์ key ไม่เคยถูกเปิดให้คนอื่นอ่าน แม้ชั่วขณะก่อน chmod
   print -r -- "# WhisperFirst API keys (readable by this user only)" > "$SUPPORT/.env"
   [[ -n "${GEMINI_API_KEY:-}" ]] && print -r -- "GEMINI_API_KEY=$GEMINI_API_KEY" >> "$SUPPORT/.env"
   chmod 600 "$SUPPORT/.env"

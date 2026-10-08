@@ -10,7 +10,8 @@ enum Paths {
     static var aboutMe: URL { support.appendingPathComponent("about-me.md") }
     static var prompts: URL { support.appendingPathComponent("prompts") }
     static var history: URL { support.appendingPathComponent("history.jsonl") }
-    static let log = URL(fileURLWithPath: NSHomeDirectory() + "/logs/whisperfirst.log")
+    /// log อยู่ใน ~/Library/Logs (สิทธิ์ 600, หมุนไฟล์ที่ 2MB) · ไม่เก็บข้อความที่พูด
+    static let log = URL(fileURLWithPath: NSHomeDirectory() + "/Library/Logs/WhisperFirst/whisperfirst.log")
 }
 
 /// ปุ่มที่กดค้างเพื่อพูด (ปุ่ม modifier ฝั่งขวา ไม่ชนกับคีย์ลัดทั่วไป)
@@ -89,6 +90,11 @@ struct Config: Codable {
     /// ส่งข้อความก่อนเคอร์เซอร์ไปเป็นบริบท (ช่วยสะกดชื่อ/ต่อประโยค) — ช่องรหัสผ่านไม่ส่งเสมอ
     var useContext = true
     var restoreClipboard = true
+    /// เก็บประวัติในเครื่อง · จำนวนวัน (0 = ตลอดไป)
+    var keepHistory = true
+    var historyDays = 30
+    /// ใช้ key จาก ~/.config/elevenlabs/api_key (ของเครื่องมืออื่น) ได้ — ต้องเปิดเอง
+    var useSystemElevenLabsKey = false
     /// bundle id → ลักษณะการเขียนในแอปนั้น
     var appHints: [String: String] = Config.defaultHints
 
@@ -117,6 +123,9 @@ struct Config: Codable {
         learnFromEdits = v(.learnFromEdits, d.learnFromEdits)
         useContext = v(.useContext, d.useContext)
         restoreClipboard = v(.restoreClipboard, d.restoreClipboard)
+        keepHistory = v(.keepHistory, d.keepHistory)
+        historyDays = v(.historyDays, d.historyDays)
+        useSystemElevenLabsKey = v(.useSystemElevenLabsKey, d.useSystemElevenLabsKey)
         appHints = v(.appHints, d.appHints)
     }
 
@@ -173,8 +182,7 @@ enum Store {
     static func save() {
         let enc = JSONEncoder()
         enc.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
-        try? FileManager.default.createDirectory(at: Paths.support, withIntermediateDirectories: true)
-        try? enc.encode(config).write(to: Paths.config, options: .atomic)
+        if let data = try? enc.encode(config) { Files.writeSecure(data, to: Paths.config) }
     }
 }
 
@@ -202,18 +210,18 @@ enum Keys {
         nonEmpty(env()["GEMINI_API_KEY"]) ?? nonEmpty(ProcessInfo.processInfo.environment["GEMINI_API_KEY"])
     }
 
+    /// key ของ ElevenLabs: ที่ใส่ในแอป · หรือ ~/.config/elevenlabs/api_key เฉพาะเมื่อผู้ใช้อนุญาตให้ใช้ (ไม่หยิบ key ของโปรแกรมอื่นเงียบๆ)
     static var elevenLabs: String? {
         nonEmpty(env()["ELEVENLABS_API_KEY"])
-            ?? nonEmpty(try? String(contentsOfFile: NSHomeDirectory() + "/.config/elevenlabs/api_key", encoding: .utf8))
+            ?? (Store.config.useSystemElevenLabsKey
+                ? nonEmpty(try? String(contentsOfFile: NSHomeDirectory() + "/.config/elevenlabs/api_key", encoding: .utf8)) : nil)
     }
 
     static func save(gemini: String, elevenLabs: String) {
         var lines = ["# WhisperFirst API keys (readable by this user only)"]
         if let g = nonEmpty(gemini) { lines.append("GEMINI_API_KEY=\(g)") }
         if let e = nonEmpty(elevenLabs) { lines.append("ELEVENLABS_API_KEY=\(e)") }
-        try? FileManager.default.createDirectory(at: Paths.support, withIntermediateDirectories: true)
-        try? (lines.joined(separator: "\n") + "\n").write(to: Paths.env, atomically: true, encoding: .utf8)
-        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: Paths.env.path)
+        Files.writeSecure(Data((lines.joined(separator: "\n") + "\n").utf8), to: Paths.env)
     }
 
     /// ค่าที่ผู้ใช้ตั้งเองใน .env (ไม่รวม fallback) — ไว้แสดงในหน้าตั้งค่า
@@ -229,11 +237,18 @@ enum Log {
         if echo { FileHandle.standardError.write("· \(s)\n".data(using: .utf8)!) }
         let line = "\(ISO8601DateFormatter().string(from: Date())) | \(s)\n"
         q.async {
-            try? FileManager.default.createDirectory(at: Paths.log.deletingLastPathComponent(), withIntermediateDirectories: true)
+            let fm = FileManager.default
+            try? fm.createDirectory(at: Paths.log.deletingLastPathComponent(), withIntermediateDirectories: true,
+                                    attributes: [.posixPermissions: 0o700])
+            if let size = (try? fm.attributesOfItem(atPath: Paths.log.path))?[.size] as? Int, size > 2_000_000 {
+                let old = Paths.log.appendingPathExtension("1")
+                try? fm.removeItem(at: old)
+                try? fm.moveItem(at: Paths.log, to: old)
+            }
             if let h = try? FileHandle(forWritingTo: Paths.log) {
                 h.seekToEndOfFile(); h.write(line.data(using: .utf8)!); try? h.close()
             } else {
-                try? line.write(to: Paths.log, atomically: true, encoding: .utf8)
+                fm.createFile(atPath: Paths.log.path, contents: line.data(using: .utf8), attributes: [.posixPermissions: 0o600])
             }
         }
     }

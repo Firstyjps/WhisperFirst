@@ -53,7 +53,7 @@ Wispr Flow เร็วเพราะส่งเสียงไปประม
 - เจอ 429 (quota) → งดยิงล่วงหน้า/คู่ขนาน 60 วิอัตโนมัติ
 
 ## เรียนรู้คำจากการแก้ไข
-วางแล้ว → อ่านช่องพิมพ์ซ้ำทุก 1.5 วิ (Accessibility) → ผู้ใช้แก้แล้วนิ่ง 6 วิ / เริ่มพูดรอบใหม่ → diff แบบตัดคำไทย (CFStringTokenizer) → Gemini ตัดสินว่า "ฟังผิด/สะกดไม่ตรงใจ" (ออกเสียงคล้ายกัน หรือคำเดียวกันสะกดต่าง) หรือ "เปลี่ยนใจ" → ถ้าใช่ เพิ่มลงพจนานุกรมใต้หัวข้อ "เรียนรู้อัตโนมัติ" เป็น `ได้ยิน ~> คำที่ถูก` (คำใบ้ให้โมเดล ไม่แทนที่ตรงตัว) + toast "📘 จำคำใหม่" · เมนูมี "↶ ลืมคำที่เพิ่งเรียนรู้"
+วางแล้ว → อ่านช่องพิมพ์ซ้ำทุก 1.5 วิ (Accessibility, นอก main thread) → ผู้ใช้แก้แล้วนิ่ง 6 วิ (ข้ามถ้าลบทั้งช่อง/เขียนใหม่เกินครึ่ง) / เริ่มพูดรอบใหม่ → diff แบบตัดคำไทย (CFStringTokenizer) → Gemini ตัดสินว่า "ฟังผิด/สะกดไม่ตรงใจ" (ออกเสียงคล้ายกัน หรือคำเดียวกันสะกดต่าง) หรือ "เปลี่ยนใจ" (ต้องออกเสียงคล้ายกันจริง · คำต้องมาจากสิ่งที่แก้จริง ≤40 ตัว) → ถ้าใช่ เพิ่มลงพจนานุกรมใต้หัวข้อ "เรียนรู้อัตโนมัติ" เป็น `ได้ยิน ~> คำที่ถูก` (คำใบ้ให้โมเดล ไม่แทนที่ตรงตัว) + toast "📘 จำคำใหม่" · เมนูมี "↶ ลืมคำที่เพิ่งเรียนรู้"
 - ทดสอบ: จำ NokNok/สมชัย/GitHub/เช็ก/DeepSeek · ไม่จำ พุธ→ศุกร์, ทีม→ลูกค้า, 10→11 โมง, การพิมพ์ต่อท้าย
 - แอป Electron (Slack/VS Code/Discord) เปิด AXManualAccessibility ให้อัตโนมัติ · ช่องรหัสผ่านไม่อ่าน
 
@@ -64,7 +64,13 @@ Wispr Flow เร็วเพราะส่งเสียงไปประม
 ## ไฟล์
 - โค้ด: `Sources/Core/*` (dylib) · `Sources/Launcher` (ตัวแอป — แทบไม่เปลี่ยน → build ใหม่ไม่ต้องให้สิทธิ์ซ้ำ)
 - ข้อมูล: `~/Library/Application Support/WhisperFirst/` → `.env` (API keys), `config.json`, `dictionary.txt`, `about-me.md`, `prompts/`, `history.jsonl`
-- log: `~/logs/whisperfirst.log`
+- log: `~/Library/Logs/WhisperFirst/whisperfirst.log` (อ่านได้เฉพาะผู้ใช้ · หมุนไฟล์ที่ 2 MB · ไม่บันทึกข้อความที่พูด)
+
+## ความเป็นส่วนตัว
+- ประวัติ (`history.jsonl`) และไฟล์ key/config/พจนานุกรม เขียนแบบ atomic สิทธิ์ 600 · ปิดการเก็บประวัติ / เก็บ 7 วัน / 30 วัน / ตลอด / ล้างทั้งหมด ได้ใน Settings → Privacy
+- ไม่อ่านบริบทก่อนเคอร์เซอร์ในเทอร์มินัลและโปรแกรมจัดการรหัสผ่าน · ช่องรหัสผ่าน (Secure Input) → คัดลอกลง clipboard แทนการวาง
+- เปลี่ยนแอประหว่างพูด → คัดลอกลง clipboard แทนการวางผิดที่ · ไม่แตะ clipboard ที่เป็นข้อมูลลับ (concealed)
+- ElevenLabs key ใน `~/.config` ใช้เฉพาะเมื่อเปิด "Use ElevenLabs key from ~/.config" ใน Settings → Advanced
 
 ## Build / ทดสอบ
 ```bash
@@ -73,7 +79,7 @@ Wispr Flow เร็วเพราะส่งเสียงไปประม
 .build/release/wf stream bench/samples/vocab.wav --gap 0.6 [--nospec]   # จำลองพูดตามเวลาจริง วัดเวลาหลังปล่อยปุ่ม
 .build/release/wf learn "ข้อความที่วาง" "ข้อความหลังแก้"   # ทดสอบ diff + การตัดสินคำ
 .build/release/wf learn-e2e                   # ทั้งวงจรกับ TextEdit เบื้องหลัง (ต้องมีสิทธิ์ Accessibility)
-.build/release/wf shortcuts-test              # ป้อน key event จำลองเข้า engine ปุ่มลัด (11 กรณี)
+.build/release/wf shortcuts-test              # ป้อน key event จำลองเข้า engine ปุ่มลัด (21 กรณี)
 .build/release/wf render-shortcuts out.png    # เรนเดอร์หน้าปุ่มลัดเป็นภาพ
 python3 bench/run.py gemini:gemini-3.1-flash-lite elevenlabs   # เทียบเครื่องยนต์ (ต้องมี GEMINI_API_KEY)
 ```

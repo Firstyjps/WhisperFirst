@@ -1,4 +1,5 @@
 import AppKit
+import AVFoundation
 import ServiceManagement
 import SwiftUI
 
@@ -8,7 +9,20 @@ final class SettingsModel: ObservableObject {
     var onIslandChange: (() -> Void)?
     init(engine: ShortcutEngine) { shortcuts = ShortcutsModel(engine: engine) }
 
-    @Published var displayName = Store.config.displayName { didSet { Store.update { $0.displayName = displayName } } }
+    /// ชื่อ: บันทึกหลังหยุดพิมพ์ 0.5 วิ (ไม่เขียนไฟล์ทุกตัวอักษร)
+    @Published var displayName = Store.config.displayName { didSet { debounce { [displayName] in Store.update { $0.displayName = displayName } } } }
+    private var pendingSave: DispatchWorkItem?
+    private func debounce(_ f: @escaping () -> Void) {
+        pendingSave?.cancel()
+        let w = DispatchWorkItem(block: f)
+        pendingSave = w
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: w)
+    }
+    @Published var keepHistory = Store.config.keepHistory { didSet { Store.update { $0.keepHistory = keepHistory } } }
+    @Published var historyDays = Store.config.historyDays { didSet { Store.update { $0.historyDays = historyDays }; History.prune() } }
+    @Published var useSystemElevenLabsKey = Store.config.useSystemElevenLabsKey { didSet { Store.update { $0.useSystemElevenLabsKey = useSystemElevenLabsKey } } }
+    @Published var historyCleared = false
+    @Published var loginNeedsApproval = false
     @Published var sounds = Store.config.sounds { didSet { Store.update { $0.sounds = sounds } } }
     @Published var islandTop = Store.config.islandTop { didSet { Store.update { $0.islandTop = islandTop }; onIslandChange?() } }
     @Published var islandIdle = Store.config.islandIdle { didSet { Store.update { $0.islandIdle = islandIdle }; onIslandChange?() } }
@@ -24,7 +38,21 @@ final class SettingsModel: ObservableObject {
             guard loginItem != (SMAppService.mainApp.status == .enabled) else { return }
             do { if loginItem { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() } }
             catch { Log.write("login item: \(error.localizedDescription)") }
+            refreshLogin()   // สวิตช์ต้องตรงกับสถานะจริงเสมอ (ล้มเหลว → เด้งกลับ)
         }
+    }
+
+    /// อ่านสถานะจริงจากระบบ (อาจถูกเปลี่ยนจากเมนูบาร์หรือ System Settings)
+    func refreshLogin() {
+        let st = SMAppService.mainApp.status
+        if loginItem != (st == .enabled) { loginItem = st == .enabled }
+        loginNeedsApproval = st == .requiresApproval
+    }
+
+    func clearHistory() {
+        History.clear()
+        historyCleared = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { self.historyCleared = false }
     }
     @Published var advancedOpen = false
     @Published var showKey = false
@@ -48,13 +76,39 @@ final class TextFileModel: ObservableObject {
     let url: URL
     @Published var text = ""
     @Published var saved = false
+    /// เนื้อหาบนดิสก์ตอนโหลดล่าสุด — ไว้รู้ว่าผู้ใช้แก้ค้างไว้ไหม และมีใครเขียนไฟล์เพิ่มระหว่างนั้นไหม (ระบบเรียนรู้คำ)
+    private var loaded = ""
+    private var pending: DispatchWorkItem?
+    var dirty: Bool { text != loaded }
     init(url: URL) { self.url = url }
 
-    func load() { text = (try? String(contentsOf: url, encoding: .utf8)) ?? "" }
+    /// ไม่ทับสิ่งที่ผู้ใช้แก้ค้างไว้ (ออกจากหน้าแล้วกลับมา)
+    func load() {
+        guard !dirty else { return }
+        loaded = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+        text = loaded
+    }
+
+    /// บันทึกหลังหยุดพิมพ์ครู่หนึ่ง
+    func saveSoon() {
+        pending?.cancel()
+        let w = DispatchWorkItem { [weak self] in self?.save() }
+        pending = w
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: w)
+    }
 
     func save() {
-        guard (try? String(contentsOf: url, encoding: .utf8)) != text else { return }
-        try? text.write(to: url, atomically: true, encoding: .utf8)
+        pending?.cancel(); pending = nil
+        let disk = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+        guard disk != text else { loaded = text; return }
+        // ไฟล์ถูกเขียนเพิ่มจากที่อื่นระหว่างแก้ → เก็บบรรทัดใหม่นั้นไว้ด้วย ไม่ทับหาย
+        if disk != loaded {
+            let before = Set(loaded.components(separatedBy: "\n")), mine = Set(text.components(separatedBy: "\n"))
+            let added = disk.components(separatedBy: "\n").filter { !$0.isEmpty && !before.contains($0) && !mine.contains($0) }
+            if !added.isEmpty { text += (text.isEmpty || text.hasSuffix("\n") ? "" : "\n") + added.joined(separator: "\n") + "\n" }
+        }
+        Files.writeSecure(Data(text.utf8), to: url)
+        loaded = text
         saved = true
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { self.saved = false }
     }
@@ -77,18 +131,25 @@ struct SettingsPage: View {
                         .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Theme.chip))
                 }
                 divider
-                row("Open when I log in") { toggle($s.loginItem) }
+                row("Open when I log in", s.loginNeedsApproval ? "Waiting for your approval in System Settings → Login Items" : nil) {
+                    HStack(spacing: 8) {
+                        if s.loginNeedsApproval {
+                            Button("Open") { SMAppService.openSystemSettingsLoginItems() }.buttonStyle(PillButtonStyle())
+                        }
+                        toggle("Open when I log in", $s.loginItem)
+                    }
+                }
                 divider
-                row("Play a sound when I start and stop") { toggle($s.sounds) }
+                row("Play a sound when I start and stop") { toggle("Play a sound when I start and stop", $s.sounds) }
             }
             section("Dynamic Island") {
                 row("Where it appears", "Top blends into the notch on MacBooks") {
                     Segmented(items: [(true, "Top"), (false, "Bottom")], selection: s.islandTop, capsule: false, fontSize: 12.5) { s.islandTop = $0 }
                 }
                 divider
-                row("Show a small island when idle", "Hover it for tips, click it to start talking") { toggle($s.islandIdle) }
+                row("Show a small island when idle", "Hover it for tips, click it to start talking") { toggle("Show a small island when idle", $s.islandIdle) }
                 divider
-                row("Show my words while I talk", "See what you're saying, live") { toggle($s.liveTranscript) }
+                row("Show my words while I talk", "See what you're saying, live") { toggle("Show my words while I talk", $s.liveTranscript) }
                 divider
                 row("Speed", s.fastText ? "Short phrases are ready in about 1.5 seconds" : "Always listens to the full audio · about 2–3 seconds") {
                     Segmented(items: [(true, "Faster"), (false, "More accurate")], selection: s.fastText, capsule: false, fontSize: 12.5) { s.fastText = $0 }
@@ -96,16 +157,17 @@ struct SettingsPage: View {
                 .opacity(s.liveTranscript ? 1 : 0.45)
                 .disabled(!s.liveTranscript)
             }
+            privacy
             section("Smart helpers") {
-                row("Learn from my corrections", "If you fix a word after it's typed, it'll spell it that way next time") { toggle($s.learnFromEdits) }
+                row("Learn from my corrections", "If you fix a word after it's typed, it'll spell it that way next time") { toggle("Learn from my corrections", $s.learnFromEdits) }
                 divider
-                row("Look at nearby text for better spelling", "Never reads password fields") { toggle($s.useContext) }
+                row("Look at nearby text for better spelling", "Never reads password fields") { toggle("Look at nearby text for better spelling", $s.useContext) }
                 divider
-                row("Put my clipboard back after pasting") { toggle($s.restoreClipboard) }
+                row("Put my clipboard back after pasting") { toggle("Put my clipboard back after pasting", $s.restoreClipboard) }
             }
             advanced
         }
-        .onAppear { checkup.runIfStale() }
+        .onAppear { checkup.runIfStale(); s.refreshLogin() }
     }
 
     // MARK: check-up
@@ -137,7 +199,12 @@ struct SettingsPage: View {
             }
             HStack(spacing: 10) {
                 tile("Microphone", checkup.mic ? "WhisperFirst can hear you" : "Microphone access is off", checkup.mic, checking) {
-                    NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")!)
+                    // ยังไม่เคยขอ → ขอเลย (ถ้าเปิด System Settings ตอนนี้ แอปจะยังไม่อยู่ในรายการ)
+                    if AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined {
+                        AVCaptureDevice.requestAccess(for: .audio) { _ in DispatchQueue.main.async { checkup.runIfStale() } }
+                    } else {
+                        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")!)
+                    }
                 }
                 tile("Typing access", checkup.typing ? "Allowed to type into other apps (Accessibility)" : "Not allowed to type into other apps yet",
                      checkup.typing, checking) {
@@ -201,7 +268,11 @@ struct SettingsPage: View {
                 divider
                 row("ElevenLabs API key", "Optional — only for the backup engine") { field(SecureField("Not set", text: $s.elevenKey)) }
                 divider
-                row("Use the backup engine if Gemini is down", "ElevenLabs Scribe") { toggle($s.elevenLabsFallback) }
+                row("Use the backup engine if Gemini is down", "ElevenLabs Scribe") { toggle("Use the backup engine if Gemini is down", $s.elevenLabsFallback) }
+                divider
+                row("Use the ElevenLabs key from ~/.config/elevenlabs", "Another tool's key on this Mac — only if you allow it") {
+                    toggle("Use the ElevenLabs key from another tool", $s.useSystemElevenLabsKey)
+                }
                 divider
                 row("Models", "Tried in this order") { field(TextField("", text: $s.models)) }
                 divider
@@ -222,8 +293,36 @@ struct SettingsPage: View {
 
     private var divider: some View { Rectangle().fill(Theme.hairline).frame(height: 1).padding(.horizontal, 20) }
 
-    private func toggle(_ b: Binding<Bool>) -> some View {
-        Toggle("", isOn: b).toggleStyle(.switch).labelsHidden().tint(Theme.accent)
+    /// ป้ายซ่อนด้วยตา แต่ VoiceOver อ่านชื่อแถวได้
+    private func toggle(_ label: String, _ b: Binding<Bool>) -> some View {
+        Toggle(label, isOn: b).toggleStyle(.switch).labelsHidden().tint(Theme.accent)
+    }
+
+    // MARK: Privacy
+
+    private var privacy: some View {
+        section("Privacy") {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("What leaves your Mac").font(.system(size: 14, weight: .semibold))
+                Text("Only while you hold the key: your voice goes to Google Gemini to become text. With “Look at nearby text”, a few lines before your cursor go too (never from password fields, terminals or password managers). “Learn from my corrections” sends the phrase you fixed. The backup engine (ElevenLabs) is used only if Gemini is down.")
+                    .font(.system(size: 12.5)).foregroundStyle(Theme.muted).lineSpacing(3).fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.horizontal, 20).padding(.vertical, 14)
+            divider
+            row("Keep a history on this Mac", "Shown in History · never uploaded") { toggle("Keep a history on this Mac", $s.keepHistory) }
+            divider
+            row("Keep history for") {
+                Segmented(items: [(7, "7 days"), (30, "30 days"), (0, "Forever")], selection: s.historyDays, capsule: false, fontSize: 12.5) { s.historyDays = $0 }
+            }
+            .opacity(s.keepHistory ? 1 : 0.45).disabled(!s.keepHistory)
+            divider
+            HStack {
+                Spacer()
+                if s.historyCleared { Text("Cleared ✓").font(.system(size: 12.5, weight: .medium)).foregroundStyle(Theme.successText) }
+                Button { s.clearHistory() } label: { Label("Clear history", systemImage: "trash") }.buttonStyle(PillButtonStyle())
+            }
+            .padding(.horizontal, 20).padding(.vertical, 12)
+        }
     }
 
     private func field<V: View>(_ v: V) -> some View {
