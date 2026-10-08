@@ -280,7 +280,7 @@ public enum WFCLI {
                           .pasteLast: [["ctrl", "opt", "k:9"]], .addWord: [["ctrl", "opt", "k:2"]]]
             m.message = "ตั้ง กดค้างเพื่อพูด = fn b แล้ว ✓"
             m.recording = .init(action: .commandMode, index: nil); m.live = ["rcmd"]
-            let view = ShortcutsTab(m: m, scrollable: false).frame(width: 720).background(Color(nsColor: .windowBackgroundColor))
+            let view = ShortcutsTab(m: m).padding(40).frame(width: 820).background(Theme.contentBg).background(Color(nsColor: .windowBackgroundColor))
             let r = ImageRenderer(content: view)
             r.scale = 2
             guard let img = r.nsImage, let tiff = img.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff),
@@ -356,9 +356,9 @@ public enum WFCLI {
     /// เรนเดอร์หน้าต่างหลักแต่ละหน้าเป็นภาพ (ใช้ข้อมูลจริง) → <prefix>-home.png ฯลฯ
     static func renderHub(_ prefix: String) {
         MainActor.assumeIsolated {
-            let h = HubModel(settings: SettingsModel(engine: ShortcutEngine()))
+            let h = HubModel(settings: SettingsModel(engine: ShortcutEngine()), overlay: OverlayModel())
             h.reload()
-            for p in [HubModel.Page.dictation, .dictionary, .style, .help] {
+            for p in HubModel.Page.allCases {
                 h.page = p
                 let view = HubView(m: h, scrollable: false).frame(width: 1040)
                 let r = ImageRenderer(content: view)

@@ -11,6 +11,7 @@ final class ShortcutsModel: ObservableObject {
     @Published var recording: Slot?
     @Published var live: KeyCombo = []
     @Published var message: String?
+    @Published var messageIsError = false
     var onChange: (() -> Void)?
 
     init(engine: ShortcutEngine) {
@@ -43,32 +44,33 @@ final class ShortcutsModel: ObservableObject {
         recording = nil
         live = []
         guard !combo.isEmpty else { return }   // Esc = ยกเลิก
-        if let err = validate(combo, for: slot) { message = err; return }
+        if let err = validate(combo, for: slot) { message = err; messageIsError = true; return }
         var list = combos(slot.action)
         if let i = slot.index, i < list.count { list[i] = combo } else { list.append(combo) }
         bindings[slot.action] = list
-        message = "Set \(slot.action.title) to \(Keys2.label(combo)) ✓"
+        message = "\(slot.action.title) is now \(Self.display(combo))"
+        messageIsError = false
         save()
     }
 
     private func validate(_ c: KeyCombo, for slot: Slot) -> String? {
         if c.count == 1, let t = c.first {
             if t.hasPrefix("k:") && !Keys2.isFunctionKey(t) {
-                return "\"\(Keys2.label(t))\" alone can't be used (you couldn't type it anymore) — combine with fn / ⌃ / ⌥ / ⌘"
+                return "“\(Keys2.label(t).uppercased())” on its own would stop you typing it — add ⌃, ⌥ or ⌘"
             }
             if Keys2.isModifier(t) && !["fn", "ropt", "rcmd", "rctrl"].contains(t) {
-                return "\(Keys2.label(t)) alone conflicts with typing/system shortcuts — use fn, a right-side modifier, or a combination"
+                return "\(Keys2.label(t)) on its own clashes with normal typing — use a Right-side key or a combination"
             }
         }
         let mods = c.filter(Keys2.isModifier), keys = c.filter { $0.hasPrefix("k:") }
         if !keys.isEmpty, !keys.contains(where: Keys2.isFunctionKey), !c.contains(where: { $0.hasPrefix("m:") }) {
-            if mods.isEmpty { return "Letter keys alone would block typing — combine with fn / ⌃ / ⌥ / ⌘" }
-            if mods.allSatisfy({ Keys2.agnostic($0) == "shift" }) { return "⇧ + a letter is just a capital letter — use fn / ⌃ / ⌥ / ⌘ instead" }
+            if mods.isEmpty { return "Letters on their own would stop you typing them — add ⌃, ⌥ or ⌘" }
+            if mods.allSatisfy({ Keys2.agnostic($0) == "shift" }) { return "⇧ + a letter is just a capital letter — use ⌃, ⌥ or ⌘ instead" }
         }
         let key = Set(c)
         for a in ShortcutAction.allCases {
             for (i, other) in combos(a).enumerated() where Set(other) == key && !(a == slot.action && i == slot.index) {
-                return "Already used for \"\(a.title)\""
+                return "Already used for “\(a.title)”"
             }
         }
         return nil
@@ -87,8 +89,14 @@ final class ShortcutsModel: ObservableObject {
         var d = ShortcutAction.defaults
         d[.pushToTalk] = [["ropt"]]
         bindings = d
-        message = "Reset to defaults"
+        message = "Shortcuts are back to the defaults"
+        messageIsError = false
         save()
+    }
+
+    /// ป้ายสำหรับข้อความ: ตัวอักษรตัวใหญ่ เหมือนบนปุ่ม
+    static func display(_ c: KeyCombo) -> String {
+        Keys2.sorted(c).map { let l = Keys2.label($0); return l.count == 1 ? l.uppercased() : l }.joined(separator: " ")
     }
 
     private func save() {
@@ -98,137 +106,128 @@ final class ShortcutsModel: ObservableObject {
     }
 }
 
+/// หน้า Shortcuts — การ์ดเดียว แถวละ action · คลิกช่องเพื่ออัด · ปุ่มเส้นประ "Add another"
 struct ShortcutsTab: View {
     @ObservedObject var m: ShortcutsModel
-    var scrollable = true   // false = เรนเดอร์เป็นภาพ (ImageRenderer วาด ScrollView ไม่ได้)
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text("Shortcuts").font(.system(size: 22, weight: .semibold))
-            Text("Choose your preferred shortcuts — click ✎, hold the keys you want, release when done")
-                .foregroundStyle(.secondary).padding(.top, 4)
-            if scrollable { ScrollView { cards } } else { cards }
-            if let msg = m.message {
-                Text(msg).font(.callout).foregroundStyle(msg.hasSuffix("✓") || msg.hasPrefix("Reset") ? Color.green : Color.orange)
-                    .padding(.bottom, 8)
-            }
-            HStack(alignment: .center) {
-                Button("Reset to default") { m.reset() }.controlSize(.large)
+        VStack(alignment: .leading, spacing: 18) {
+            HStack(alignment: .top) {
+                PageTitle(title: "Shortcuts", subtitle: "Click a shortcut, hold the keys you want, then let go.")
                 Spacer()
-                Text("Esc cancels while dictating · To use fn: System Settings → Keyboard → \"Press 🌐 key to\" = Do Nothing")
-                    .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.trailing)
+                Button("Reset to defaults") { m.reset() }.buttonStyle(.plain)
+                    .font(.system(size: 13, weight: .medium)).foregroundStyle(Theme.inkSecondary)
+                    .padding(.horizontal, 14).padding(.vertical, 7)
+                    .background(Capsule().fill(Theme.card)).overlay(Capsule().strokeBorder(Theme.stroke, lineWidth: 1))
+                    .padding(.top, 10)
             }
-        }
-        .padding(20)
-    }
-
-    private var cards: some View {
-        VStack(spacing: 12) {
-            ForEach(ShortcutAction.allCases) { a in card(a) }
-        }
-        .padding(.vertical, 16)
-    }
-
-    private func card(_ a: ShortcutAction) -> some View {
-        let list = m.combos(a)
-        let addingHere = m.recording == ShortcutsModel.Slot(action: a, index: nil)
-        return HStack(alignment: .top, spacing: 16) {
+            if let msg = m.message {
+                HStack(spacing: 9) {
+                    Image(systemName: m.messageIsError ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
+                    Text(msg).font(.system(size: 13, weight: .medium))
+                    Spacer()
+                }
+                .foregroundStyle(m.messageIsError ? Theme.warnText : Theme.successBanner)
+                .padding(.horizontal, 16).padding(.vertical, 11)
+                .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(m.messageIsError ? Theme.warnBg : Theme.successBg))
+                .transition(.opacity)
+            }
+            VStack(spacing: 0) {
+                ForEach(Array(ShortcutAction.allCases.enumerated()), id: \.element) { i, a in
+                    if i > 0 { Rectangle().fill(Theme.hairline).frame(height: 1) }
+                    row(a)
+                }
+            }
+            .wfCard(18)
             VStack(alignment: .leading, spacing: 6) {
-                Text(a.title).font(.system(size: 15, weight: .semibold))
-                Text(a.detail).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                (Text("Press ") + Text("Esc").bold() + Text(" while talking to cancel."))
+                (Text("Want to use the ") + Text("fn / globe").bold() + Text(" key? In System Settings → Keyboard, set “Press globe key to” → Do Nothing."))
+            }
+            .font(.system(size: 12.5)).foregroundStyle(Theme.muted).padding(.leading, 4)
+        }
+        .animation(.easeOut(duration: 0.2), value: m.message)
+    }
+
+    private func row(_ a: ShortcutAction) -> some View {
+        let list = m.combos(a)
+        let adding = m.recording == ShortcutsModel.Slot(action: a, index: nil)
+        return HStack(alignment: .top, spacing: 18) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(a.title).font(.system(size: 14.5, weight: .semibold))
+                Text(a.detail).font(.system(size: 12.5)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-
-            VStack(alignment: .trailing, spacing: 10) {
+            VStack(spacing: 8) {
                 if a == .handsFree, let ptt = m.combos(.pushToTalk).first {
-                    HStack(spacing: 10) {
-                        field(prefix: "Double tap", combo: ptt, recording: false, buttons: false, a: a, i: nil)
-                        Color.clear.frame(width: 40, height: 1)
+                    HStack(spacing: 8) {
+                        Text("Double-tap").font(.system(size: 12.5)).foregroundStyle(Theme.muted)
+                        Keycaps(combo: ptt)
+                        Spacer()
                     }
+                    .padding(.horizontal, 12).frame(height: 38)
+                    .background(RoundedRectangle(cornerRadius: 11, style: .continuous).fill(Theme.windowBg))
                 }
                 ForEach(Array(list.enumerated()), id: \.offset) { i, c in
-                    let rec = m.recording == ShortcutsModel.Slot(action: a, index: i)
-                    HStack(spacing: 10) {
-                        field(prefix: nil, combo: rec ? m.live : c, recording: rec, buttons: true, a: a, i: i)
-                        if i == list.count - 1 && !addingHere { plusButton(a) } else { Color.clear.frame(width: 40, height: 1) }
-                    }
+                    ComboField(m: m, action: a, index: i, combo: c,
+                               removable: !(a.required && list.count <= 1))
                 }
-                if addingHere {
-                    HStack(spacing: 10) {
-                        field(prefix: nil, combo: m.live, recording: true, buttons: true, a: a, i: nil)
-                        Color.clear.frame(width: 40, height: 1)
-                    }
-                } else if list.isEmpty {
-                    HStack(spacing: 10) {
-                        Button { m.startRecording(a, index: nil) } label: {
-                            HStack {
-                                Text("Click to add a shortcut").foregroundStyle(.secondary)
-                                Spacer()
-                                Image(systemName: "pencil").foregroundStyle(.secondary)
-                            }
-                            .padding(.horizontal, 12).frame(height: 40)
-                            .background(fieldBackground(active: false))
-                            .contentShape(Rectangle())
+                if adding {
+                    ComboField(m: m, action: a, index: nil, combo: [], removable: false)
+                } else {
+                    Button { m.startRecording(a, index: nil) } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "plus").font(.system(size: 11, weight: .semibold))
+                            Text(list.isEmpty ? "Add a shortcut" : "Add another").font(.system(size: 13, weight: .medium))
                         }
-                        .buttonStyle(.plain)
-                        .frame(width: 250)
-                        Color.clear.frame(width: 40, height: 1)
+                        .foregroundStyle(list.isEmpty ? Theme.accentText : Theme.muted)
+                        .frame(maxWidth: .infinity).frame(height: 34)
+                        .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous)
+                            .strokeBorder(Color(hex: 0xDDD4C9), style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
+                        .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
                 }
             }
+            .frame(width: 300)
         }
-        .padding(18)
-        .background(RoundedRectangle(cornerRadius: 12).fill(Color.primary.opacity(0.045)))
+        .padding(.vertical, 16).padding(.horizontal, 22)
     }
+}
 
-    private func field(prefix: String?, combo: KeyCombo, recording: Bool, buttons: Bool, a: ShortcutAction, i: Int?) -> some View {
+/// ช่องปุ่มลัดหนึ่งชุด: คลิกเพื่ออัดใหม่ · ระหว่างอัดขอบส้ม + "Press keys…"
+private struct ComboField: View {
+    @ObservedObject var m: ShortcutsModel
+    let action: ShortcutAction
+    let index: Int?
+    let combo: KeyCombo
+    let removable: Bool
+    @StateObject private var hover = HoverState()
+
+    var body: some View {
+        let rec = m.recording == ShortcutsModel.Slot(action: action, index: index)
         HStack(spacing: 6) {
-            if let prefix { Text(prefix).foregroundStyle(.secondary) }
-            if recording && combo.isEmpty {
-                Text("Press keys…").foregroundStyle(Color.accentColor)
+            if rec && m.live.isEmpty {
+                Text("Press keys…").font(.system(size: 13)).foregroundStyle(Theme.accentText)
             } else {
-                ForEach(Keys2.sorted(combo), id: \.self) { t in chip(Keys2.label(t)) }
+                Keycaps(combo: rec ? m.live : combo)
             }
             Spacer(minLength: 4)
-            if buttons {
-                if recording {
-                    Button { m.cancelRecording() } label: { Image(systemName: "xmark.circle.fill") }
-                        .buttonStyle(.plain).foregroundStyle(.secondary).help("Cancel (Esc)")
-                } else {
-                    Button { m.startRecording(a, index: i) } label: { Image(systemName: "pencil") }
-                        .buttonStyle(.plain).foregroundStyle(.secondary).help("Edit")
-                    if let i, !(a.required && m.combos(a).count <= 1) {
-                        Button { m.remove(a, i) } label: { Image(systemName: "trash") }
-                            .buttonStyle(.plain).foregroundStyle(.secondary).help("Delete")
-                    }
+            if rec {
+                Button { m.cancelRecording() } label: { Image(systemName: "xmark").font(.system(size: 10, weight: .bold)).foregroundStyle(Theme.muted) }
+                    .buttonStyle(.plain).help("Cancel (Esc)")
+            } else {
+                Text("Change").font(.system(size: 12)).foregroundStyle(Theme.faint).opacity(hover.on ? 1 : 0.85)
+                if removable, let index {
+                    Button { m.remove(action, index) } label: { Image(systemName: "trash").font(.system(size: 11.5)).foregroundStyle(Theme.faint) }
+                        .buttonStyle(.plain).help("Remove")
                 }
             }
         }
-        .font(.system(size: 14))
-        .padding(.horizontal, 12)
-        .frame(width: 250, height: 40)
-        .background(fieldBackground(active: recording))
-    }
-
-    private func chip(_ s: String) -> some View {
-        Text(s).font(.system(size: 13, weight: .medium))
-            .padding(.horizontal, 7).padding(.vertical, 3)
-            .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.08)))
-    }
-
-    private func plusButton(_ a: ShortcutAction) -> some View {
-        Button { m.startRecording(a, index: nil) } label: {
-            Image(systemName: "plus").font(.system(size: 15, weight: .medium))
-                .frame(width: 40, height: 40)
-                .background(RoundedRectangle(cornerRadius: 9).fill(Color.primary.opacity(0.07)))
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain).help("Add another")
-    }
-
-    private func fieldBackground(active: Bool) -> some View {
-        RoundedRectangle(cornerRadius: 9)
-            .fill(Color(nsColor: .textBackgroundColor))
-            .overlay(RoundedRectangle(cornerRadius: 9).stroke(active ? Color.accentColor : Color.primary.opacity(0.12), lineWidth: active ? 2 : 1))
+        .padding(.horizontal, 12).frame(height: 38)
+        .background(RoundedRectangle(cornerRadius: 11, style: .continuous).fill(Theme.card))
+        .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous).strokeBorder(rec ? Theme.accent : (hover.on ? Theme.keycapEdge : Theme.stroke), lineWidth: rec ? 2 : 1))
+        .contentShape(Rectangle())
+        .onTapGesture { if !rec { m.startRecording(action, index: index) } }
+        .onHover { hover.on = $0 }
     }
 }

@@ -266,7 +266,7 @@ final class Controller {
         Inserter.paste(text, restore: Store.config.restoreClipboard)
         lastText = text
         History.append(HistoryEntry(t: Date().timeIntervalSince1970, app: target.name, mode: command ? "command" : "dictate",
-                                    text: r.text, model: r.model, ms: r.ms, sec: seconds))
+                                    text: r.text, model: r.model, ms: r.ms, sec: seconds, bundle: target.bundle))
         overlay.done(r.text)
         if !command { learner.track(inserted: text) }
     }

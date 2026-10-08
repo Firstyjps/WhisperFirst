@@ -10,7 +10,7 @@ enum StyleCategory: String, CaseIterable, Identifiable, Codable {
         case .personal: "Personal messages"
         case .work: "Work messages"
         case .email: "Email"
-        case .other: "Other"
+        case .other: "Everything else"
         }
     }
 
@@ -20,6 +20,16 @@ enum StyleCategory: String, CaseIterable, Identifiable, Codable {
         case .work: "Slack, Microsoft Teams"
         case .email: "Mail, Outlook"
         case .other: "All other apps — notes, docs, Terminal, Claude, ChatGPT…"
+        }
+    }
+
+    /// รายชื่อแอปแยกเป็นชิ้น (แถว "Used in")
+    var appList: [String] {
+        switch self {
+        case .personal: ["LINE", "Messenger", "WhatsApp", "Messages", "Telegram", "Discord"]
+        case .work: ["Slack", "Microsoft Teams"]
+        case .email: ["Mail", "Outlook"]
+        case .other: ["Notes", "Docs", "Terminal", "Claude", "ChatGPT", "and more"]
         }
     }
 

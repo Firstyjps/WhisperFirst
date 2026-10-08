@@ -57,7 +57,8 @@ final class OverlayModel: ObservableObject {
 
     func push(level: Float) {
         // เสียงพูดปกติ RMS ~0.02–0.2 → ขยายแบบ log ให้เห็นชัด
-        let v = CGFloat(max(0, min(1, (log10(max(level, 0.0005)) + 3.0) / 2.3)))
+        let target = CGFloat(max(0, min(1, (log10(max(level, 0.0005)) + 3.0) / 2.3)))
+        let v = (levels.last ?? 0) * 0.35 + target * 0.65   // นุ่มขึ้น ไม่กระตุก
         levels.removeFirst()
         levels.append(v)
     }
@@ -104,7 +105,10 @@ final class OverlayModel: ObservableObject {
         switch phase {
         case .idle: return notched ? CGSize(width: notchWidth, height: 0) : (top ? CGSize(width: 96, height: 9) : CGSize(width: 64, height: 9))
         case .hover: return CGSize(width: 360, height: 38)
-        case .listening: return CGSize(width: liveText.isEmpty ? 330 : 470, height: liveText.isEmpty ? 44 : 72)
+        case .listening:
+            // กว้างพอดีเนื้อหา (แฮนด์ฟรีมีป้าย + ปุ่ม ✕ ✓ · โหมดคำสั่งมีป้าย) — แก้ไอคอน/ปุ่มล้นขอบ
+            let w = 330 + (handsFree ? 150 : 0) + (command ? 84 : 0)
+            return CGSize(width: liveText.isEmpty ? CGFloat(w) : max(470, CGFloat(w)), height: liveText.isEmpty ? 44 : 72)
         case .thinking: return CGSize(width: liveText.isEmpty ? 250 : 470, height: liveText.isEmpty ? 40 : 66)
         case .done: return CGSize(width: 460, height: 40)
         case .message: return CGSize(width: 420, height: 40)
@@ -130,34 +134,42 @@ struct IslandView: View {
     var body: some View {
         let outer = m.outerSize
         let radius = min(22, max(outer.height / 2, 4))
+        let shoulder: CGFloat = m.top && outer.height > 0 ? min(10, outer.height) : 0
+        let idle = m.phase == .idle
+        let island = IslandShape(radius: radius, shoulder: shoulder, top: m.top)
         ZStack(alignment: m.top ? .top : .bottom) {
             Color.clear
             ZStack(alignment: m.top ? .bottom : .center) {
-                shape(radius: radius)
+                island
                     .fill(Color.black)
-                    .shadow(color: .black.opacity(m.phase == .idle ? 0 : 0.35), radius: 12, y: 4)
-                shape(radius: radius)
-                    .stroke(Color.white.opacity(m.phase == .idle || (m.top && m.notchWidth > 0 && m.topInset > 0 && m.phase == .idle) ? 0.08 : 0.1), lineWidth: 1)
-                content
-                    .frame(width: m.size.width, height: m.size.height)
-                    .opacity(m.phase == .idle ? 0 : 1)
+                    .shadow(color: .black.opacity(idle ? 0 : 0.32), radius: 14, y: 10)
+                    .shadow(color: .black.opacity(idle ? 0 : 0.18), radius: 3, y: 2)
+                island
+                    .stroke(Color.white.opacity(idle ? 0.05 : 0.08), lineWidth: 0.5)
+                ZStack {
+                    if !idle {
+                        content
+                            .id(m.phase)
+                            .transition(.asymmetric(
+                                insertion: .opacity.combined(with: .scale(scale: 0.94))
+                                    .combined(with: .modifier(active: BlurModifier(radius: 6), identity: BlurModifier(radius: 0))),
+                                removal: .opacity.animation(.easeOut(duration: 0.12))))
+                    }
+                }
+                .frame(width: m.size.width, height: m.size.height)
+                .animation(spring.delay(0.09), value: m.phase)
             }
-            .frame(width: outer.width, height: outer.height)
+            .frame(width: outer.width + shoulder * 2, height: outer.height)
             .contentShape(Rectangle())
             .onTapGesture { if m.phase == .idle || m.phase == .hover { m.onStart() } }
         }
         .frame(width: Self.canvas.width, height: Self.canvas.height)
         .animation(spring, value: m.phase)
         .animation(spring, value: m.liveText.isEmpty)
+        .animation(spring, value: m.handsFree)
+        .animation(spring, value: m.command)
         .foregroundStyle(.white)
         .environment(\.colorScheme, .dark)
-    }
-
-    /// บน: ขอบบนเรียบติดขอบจอ (เหมือนรอยบาก) · ล่าง: แคปซูลเต็ม
-    private func shape(radius: CGFloat) -> UnevenRoundedRectangle {
-        m.top
-            ? UnevenRoundedRectangle(topLeadingRadius: 0, bottomLeadingRadius: radius, bottomTrailingRadius: radius, topTrailingRadius: 0, style: .continuous)
-            : UnevenRoundedRectangle(topLeadingRadius: radius, bottomLeadingRadius: radius, bottomTrailingRadius: radius, topTrailingRadius: radius, style: .continuous)
     }
 
     @ViewBuilder private var content: some View {
@@ -174,7 +186,7 @@ struct IslandView: View {
             VStack(spacing: 6) {
                 HStack(spacing: 10) {
                     appBadge
-                    Waveform(levels: m.levels, tint: m.command ? AnyShapeStyle(Color.orange) : AnyShapeStyle(gradient))
+                    Waveform(levels: m.levels, command: m.command)
                         .frame(maxWidth: .infinity)
                     if m.command { badge("Command", .orange) }
                     if m.handsFree { badge("Hands-free", .blue) }
@@ -183,8 +195,8 @@ struct IslandView: View {
                             .font(.system(size: 12, weight: .medium, design: .monospaced)).foregroundStyle(.white.opacity(0.6))
                     }
                     if m.handsFree {
-                        iconButton("xmark", .white.opacity(0.18)) { m.onCancel() }
-                        iconButton("checkmark", Color(red: 0.95, green: 0.35, blue: 0.4)) { m.onStop() }
+                        IslandButton(symbol: "xmark", fill: .white.opacity(0.16), hoverFill: .white.opacity(0.26)) { m.onCancel() }
+                        IslandButton(symbol: "checkmark", fill: Color(red: 0.949, green: 0.349, blue: 0.4), hoverFill: Color(red: 1, green: 0.42, blue: 0.47)) { m.onStop() }
                     }
                 }
                 if !m.liveText.isEmpty {
@@ -193,6 +205,10 @@ struct IslandView: View {
                         .lineLimit(1).truncationMode(.head)
                         .foregroundStyle(.white.opacity(0.78))
                         .frame(maxWidth: .infinity, alignment: .leading)
+                        .mask(HStack(spacing: 0) {   // ข้อความยาวเกิน → จางขอบซ้าย 40pt
+                            if m.liveText.count > 48 { LinearGradient(colors: [.clear, .black], startPoint: .leading, endPoint: .trailing).frame(width: 40) }
+                            Color.black
+                        })
                         .transition(.opacity)
                 }
             }
@@ -262,15 +278,6 @@ struct IslandView: View {
             .background(Capsule().fill(c.opacity(0.85)))
     }
 
-    private func iconButton(_ symbol: String, _ bg: Color, _ action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: symbol).font(.system(size: 10, weight: .bold))
-                .frame(width: 22, height: 22)
-                .background(Circle().fill(bg))
-        }
-        .buttonStyle(.plain)
-    }
-
     private func pill(_ s: String, _ action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(s).font(.system(size: 11.5, weight: .semibold))
@@ -286,19 +293,88 @@ struct IslandView: View {
     }
 }
 
-/// คลื่นเสียงแบบแท่งกลางสมมาตร (ใหม่อยู่ขวา)
+/// คลื่นเสียง: ไล่สีต่อเนื่องเส้นเดียวทั้งแถบ (#FF944D → #ED408C) mask ด้วยแท่ง · จางขอบซ้าย
 private struct Waveform: View {
     let levels: [CGFloat]
-    let tint: AnyShapeStyle
+    let command: Bool
     var body: some View {
-        HStack(alignment: .center, spacing: 2.5) {
-            ForEach(Array(levels.enumerated()), id: \.offset) { i, v in
-                let fade = 0.35 + 0.65 * Double(i) / Double(max(1, levels.count - 1))
-                Capsule().fill(tint).frame(width: 3, height: 3 + v * 22).opacity(fade)
-            }
+        Rectangle()
+            .fill(command
+                  ? AnyShapeStyle(Color(red: 1, green: 0.62, blue: 0.04))
+                  : AnyShapeStyle(LinearGradient(colors: [Color(red: 1, green: 0.58, blue: 0.30), Color(red: 0.93, green: 0.25, blue: 0.55)],
+                                                 startPoint: .leading, endPoint: .trailing)))
+            .mask(
+                HStack(alignment: .center, spacing: 2.5) {
+                    ForEach(Array(levels.enumerated()), id: \.offset) { _, v in
+                        Capsule().frame(width: 3, height: 3 + v * 22)
+                    }
+                }
+                .animation(.linear(duration: 0.1), value: levels)
+            )
+            .mask(LinearGradient(stops: [.init(color: .black.opacity(0.25), location: 0), .init(color: .black, location: 0.55)],
+                                 startPoint: .leading, endPoint: .trailing))
+            .frame(width: CGFloat(levels.count) * 5.5, height: 26)
+    }
+}
+
+/// ไหล่เว้า 10pt ที่มุมบนสองข้าง (ไหลเข้าขอบจอแบบรอยบาก) · โหมดล่าง = มุมมนทุกด้าน
+struct IslandShape: Shape {
+    var radius: CGFloat
+    var shoulder: CGFloat
+    var top: Bool
+
+    var animatableData: AnimatablePair<CGFloat, CGFloat> {
+        get { AnimatablePair(radius, shoulder) }
+        set { radius = newValue.first; shoulder = newValue.second }
+    }
+
+    func path(in rect: CGRect) -> Path {
+        var p = Path()
+        let s = shoulder, w = rect.width, h = rect.height
+        let r = min(radius, (w - 2 * s) / 2, h)
+        guard top else {
+            return Path(roundedRect: rect, cornerRadius: min(radius, h / 2), style: .continuous)
         }
-        .frame(height: 26)
-        .animation(.easeOut(duration: 0.09), value: levels)
+        p.move(to: CGPoint(x: 0, y: 0))
+        p.addQuadCurve(to: CGPoint(x: s, y: min(s, h)), control: CGPoint(x: s, y: 0))
+        p.addLine(to: CGPoint(x: s, y: h - r))
+        p.addQuadCurve(to: CGPoint(x: s + r, y: h), control: CGPoint(x: s, y: h))
+        p.addLine(to: CGPoint(x: w - s - r, y: h))
+        p.addQuadCurve(to: CGPoint(x: w - s, y: h - r), control: CGPoint(x: w - s, y: h))
+        p.addLine(to: CGPoint(x: w - s, y: min(s, h)))
+        p.addQuadCurve(to: CGPoint(x: w, y: 0), control: CGPoint(x: w - s, y: 0))
+        p.closeSubpath()
+        return p
+    }
+}
+
+private struct BlurModifier: ViewModifier {
+    let radius: CGFloat
+    func body(content: Content) -> some View { content.blur(radius: radius) }
+}
+
+/// ปุ่มวงกลม 22pt บนเกาะ: hover สว่างขึ้น · กดยุบ 0.9
+private struct IslandButton: View {
+    let symbol: String
+    let fill: Color
+    let hoverFill: Color
+    let action: () -> Void
+    @StateObject private var hover = HoverState()
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: symbol).font(.system(size: 10, weight: .bold))
+                .frame(width: 22, height: 22)
+                .background(Circle().fill(hover.on ? hoverFill : fill))
+        }
+        .buttonStyle(PressScale())
+        .onHover { hover.on = $0 }
+    }
+}
+
+private struct PressScale: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label.scaleEffect(configuration.isPressed ? 0.9 : 1).animation(.easeOut(duration: 0.1), value: configuration.isPressed)
     }
 }
 

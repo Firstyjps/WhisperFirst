@@ -1,17 +1,20 @@
 import AppKit
+import AVFoundation
 import SwiftUI
 
-/// หน้าต่างหลัก — ภาษาดีไซน์แบบ Wispr Flow: โทนครีมสว่าง · การ์ดเนื้อหาสีขาว · ตัวเลข serif · รายการเส้นคั่นบางๆ
+/// หน้าต่างหลัก — ดีไซน์จาก handoff "UI ปรับปรุงเพื่อ Production" (Claude Design, Round 3)
+/// โทนครีมนุ่ม · ตัวอักษร rounded · ไม่มี scrollbar · ภาษาง่ายสำหรับคนทั่วไป
 @MainActor
 final class HubModel: ObservableObject {
     enum Page: String, CaseIterable, Identifiable {
-        case dictation, dictionary, style, shortcuts, settings, help
+        case home, history, dictionary, style, shortcuts, settings, help
         var id: String { rawValue }
         var title: String {
             switch self {
-            case .dictation: "Dictation"
+            case .home: "Home"
+            case .history: "History"
             case .dictionary: "Dictionary"
-            case .style: "Style"
+            case .style: "Writing Style"
             case .shortcuts: "Shortcuts"
             case .settings: "Settings"
             case .help: "Help"
@@ -19,7 +22,8 @@ final class HubModel: ObservableObject {
         }
         var icon: String {
             switch self {
-            case .dictation: "mic"
+            case .home: "house"
+            case .history: "clock"
             case .dictionary: "character.book.closed"
             case .style: "textformat"
             case .shortcuts: "keyboard"
@@ -27,25 +31,31 @@ final class HubModel: ObservableObject {
             case .help: "questionmark.circle"
             }
         }
-        static let main: [Page] = [.dictation, .dictionary, .style, .shortcuts]
+        static let main: [Page] = [.home, .history, .dictionary, .style, .shortcuts]
         static let bottom: [Page] = [.settings, .help]
     }
 
-    @Published var page: Page = .dictation
+    @Published var page: Page = .home
     @Published var entries: [HistoryEntry] = []
     @Published var search = ""
-    @Published var searching = false
-    @Published var hovered: Double?
     @Published var copiedID: Double?
     @Published var styleTab: StyleCategory = .personal
     @Published var styles: [StyleCategory: WritingStyle] = [:]
     let settings: SettingsModel
     let dictionary = DictionaryModel()
+    let checkup = CheckupModel()
+    let overlay: OverlayModel
     var onDemo: () -> Void = {}
+    private var observer: NSObjectProtocol?
 
-    init(settings: SettingsModel) {
+    init(settings: SettingsModel, overlay: OverlayModel) {
         self.settings = settings
+        self.overlay = overlay
         loadStyles()
+        // พูดเสร็จ → ประวัติใหม่ขึ้นทันทีใน Home/History
+        observer = NotificationCenter.default.addObserver(forName: History.changed, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.entries = History.recent(5000) }
+        }
     }
 
     func reload() {
@@ -67,7 +77,7 @@ final class HubModel: ObservableObject {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(e.text, forType: .string)
         copiedID = e.id
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { if self.copiedID == e.id { self.copiedID = nil } }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.3) { if self.copiedID == e.id { self.copiedID = nil } }
     }
 
     func delete(_ e: HistoryEntry) {
@@ -77,15 +87,14 @@ final class HubModel: ObservableObject {
 
     // MARK: สถิติ
 
-    struct Stats { var words = 0; var savedMinutes = 0; var wpm = 0; var streak = 0 }
+    struct Stats { var words = 0; var savedMinutes = 0; var streak = 0 }
 
     var stats: Stats {
         var s = Stats()
         var spoken = 0.0, ms = 0
         for e in entries { s.words += Self.wordCount(e.text); spoken += e.sec; ms += e.ms }
-        // พิมพ์ไทยเฉลี่ย ~35 คำ/นาที vs เวลาพูด + รอผล
+        // พิมพ์เฉลี่ย ~35 คำ/นาที vs เวลาพูด + รอผล
         s.savedMinutes = max(0, Int((Double(s.words) / 35 * 60 - spoken - Double(ms) / 1000) / 60))
-        s.wpm = spoken > 0 ? Int(Double(s.words) / (spoken / 60)) : 0
         let cal = Calendar.current
         let days = Set(entries.map { cal.startOfDay(for: Date(timeIntervalSince1970: $0.t)) })
         var d = cal.startOfDay(for: Date())
@@ -113,7 +122,49 @@ final class HubModel: ObservableObject {
     }
 
     static let dayFmt: DateFormatter = { let f = DateFormatter(); f.locale = Locale(identifier: "en_US"); f.dateFormat = "EEEE, MMMM d"; return f }()
-    static let timeFmt: DateFormatter = { let f = DateFormatter(); f.locale = Locale(identifier: "en_US"); f.dateFormat = "h:mma"; f.amSymbol = "am"; f.pmSymbol = "pm"; return f }()
+    static let timeFmt: DateFormatter = { let f = DateFormatter(); f.locale = Locale(identifier: "en_US"); f.dateFormat = "h:mm a"; return f }()
+
+    var greeting: String {
+        let h = Calendar.current.component(.hour, from: Date())
+        return h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening"
+    }
+}
+
+/// ตรวจสุขภาพ: ไมค์ · สิทธิ์พิมพ์ลงแอปอื่น · การเชื่อมต่อ (ยิงข้อความสั้นๆ วัดเวลาตอบ)
+@MainActor
+final class CheckupModel: ObservableObject {
+    enum State { case idle, checking, done }
+    @Published var state: State = .idle
+    @Published var mic = false
+    @Published var typing = false
+    @Published var online = false
+    @Published var seconds: Double = 0
+    @Published var checkedAt: Date?
+
+    var allGood: Bool { mic && typing && online }
+
+    func runIfStale() {
+        if state == .checking { return }
+        if let t = checkedAt, Date().timeIntervalSince(t) < 60 { return }
+        run()
+    }
+
+    func run() {
+        state = .checking
+        mic = AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
+        typing = AX.trusted
+        Task {
+            let t0 = Date()
+            var ok = false
+            if Keys.gemini != nil {
+                ok = ((try? await Transcriber().complete(system: "Reply with OK only.", user: "ping", json: false)) ?? "").isEmpty == false
+            }
+            self.online = ok
+            self.seconds = Date().timeIntervalSince(t0)
+            self.checkedAt = Date()
+            self.state = .done
+        }
+    }
 }
 
 /// พจนานุกรม (แก้ไฟล์ dictionary.txt ตรง ไม่ยุ่งกับบรรทัดคอมเมนต์)
@@ -123,9 +174,8 @@ final class DictionaryModel: ObservableObject {
     @Published var fixes: [(String, String)] = []
     @Published var learned: [(String, String)] = []
     @Published var newWord = ""
-    @Published var adding = false
     @Published var rawMode = false
-    @Published var hovered: String?
+    @Published var justAdded: String?
     let raw = TextFileModel(url: Paths.dictionary)
 
     func load() {
@@ -144,8 +194,9 @@ final class DictionaryModel: ObservableObject {
         if !words.contains(w) { s += w + "\n" }
         try? s.write(to: Paths.dictionary, atomically: true, encoding: .utf8)
         newWord = ""
-        adding = false
         load()
+        justAdded = w
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { if self.justAdded == w { self.justAdded = nil } }
     }
 
     func remove(line: String) {
@@ -157,18 +208,196 @@ final class DictionaryModel: ObservableObject {
     }
 }
 
-// MARK: - สี/ตัวอักษร
+/// ไอคอนแอปจริงจาก bundle id (ประวัติใหม่) หรือชื่อแอป (ประวัติเก่า)
+@MainActor
+enum AppIcons {
+    private static var cache: [String: NSImage] = [:]
+    private static var missing: Set<String> = []
+
+    static func icon(app: String, bundle: String?) -> NSImage? {
+        let key = (bundle?.isEmpty == false ? bundle! : app)
+        if let c = cache[key] { return c }
+        if missing.contains(key) || key.isEmpty { return nil }
+        var url: URL?
+        if let b = bundle, !b.isEmpty { url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: b) }
+        if url == nil {
+            for dir in ["/Applications", "/System/Applications", "/System/Applications/Utilities", NSHomeDirectory() + "/Applications"] {
+                let p = "\(dir)/\(app).app"
+                if FileManager.default.fileExists(atPath: p) { url = URL(fileURLWithPath: p); break }
+            }
+        }
+        if url == nil { url = NSWorkspace.shared.runningApplications.first { $0.localizedName == app }?.bundleURL }
+        guard let url else { missing.insert(key); return nil }
+        let img = NSWorkspace.shared.icon(forFile: url.path)
+        cache[key] = img
+        return img
+    }
+}
+
+// MARK: - Design tokens
+
+extension Color {
+    init(hex: UInt32, alpha: Double = 1) {
+        self.init(.sRGB, red: Double((hex >> 16) & 0xFF) / 255, green: Double((hex >> 8) & 0xFF) / 255,
+                  blue: Double(hex & 0xFF) / 255, opacity: alpha)
+    }
+}
 
 enum Theme {
-    static let canvas = Color(red: 0.965, green: 0.957, blue: 0.937)     // ครีม (พื้นหลังหน้าต่าง + แถบซ้าย)
-    static let paper = Color.white                                         // การ์ดเนื้อหา
-    static let line = Color(red: 0.905, green: 0.894, blue: 0.870)         // เส้นขอบ/คั่น
-    static let ink = Color(red: 0.12, green: 0.12, blue: 0.11)
-    static let muted = Color(red: 0.47, green: 0.46, blue: 0.43)
-    static let selected = Color(red: 0.918, green: 0.910, blue: 0.890)
-    static let hover = Color(red: 0.975, green: 0.970, blue: 0.957)
-    static func serif(_ size: CGFloat, _ w: Font.Weight = .regular) -> Font { .system(size: size, weight: w, design: .serif) }
+    static let windowBg = Color(hex: 0xF6F2EC)
+    static let contentBg = Color(hex: 0xFBF9F6)
+    static let card = Color.white
+    static let ink = Color(hex: 0x2B2620)
+    static let inkSecondary = Color(hex: 0x4A433C)
+    static let muted = Color(hex: 0x8A8178)
+    static let muted2 = Color(hex: 0x9A9187)
+    static let faint = Color(hex: 0xA39A90)
+    static let hoverRow = Color(hex: 0xF7F2EC)
+    static let chip = Color(hex: 0xF6F2EC)
+    static let pillBtn = Color(hex: 0xF3EEE8)
+    static let segTrack = Color(hex: 0xEFE9E1)
+    static let hairline = Color(hex: 0xF1ECE5)
+    static let stroke = Color(hex: 0xEAE3DA)
+    static let keycapEdge = Color(hex: 0xE3DBD0)
+    static let accent = Color(hex: 0xD9732F)
+    static let accentPressed = Color(hex: 0xBF6326)
+    static let accentText = Color(hex: 0xC8641F)
+    static let accentSoft = Color(hex: 0xFBEADB)
+    static let accentSoftText = Color(hex: 0xB3561A)
+    static let successText = Color(hex: 0x2E8B4E)
+    static let successBg = Color(hex: 0xE6F4EA)
+    static let successBanner = Color(hex: 0x1F6E3A)
+    static let warnText = Color(hex: 0x9A4A12)
+    static let warnBg = Color(hex: 0xFDF0E1)
+    static let helpDark = Color(hex: 0x2B2620)
+    static let tile = Color(hex: 0xF8F5F1)
+    static let shadowTint = Color(hex: 0x50321A)
+
+    static func rounded(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font { .system(size: size, weight: weight, design: .rounded) }
 }
+
+// MARK: - ชิ้นส่วนที่ใช้ซ้ำ
+
+extension View {
+    /// การ์ดขาวมาตรฐาน: เงาสองชั้นนุ่มๆ
+    func wfCard(_ radius: CGFloat = 16) -> some View {
+        self
+            .background(RoundedRectangle(cornerRadius: radius, style: .continuous).fill(Theme.card))
+            .shadow(color: Theme.shadowTint.opacity(0.06), radius: 1, y: 1)
+            .shadow(color: Theme.shadowTint.opacity(0.05), radius: 10, y: 6)
+    }
+
+    /// เส้นขอบ 1pt รอบช่อง/การ์ดแบบ outline
+    func wfOutline(_ radius: CGFloat, _ color: Color = Theme.stroke, _ width: CGFloat = 1) -> some View {
+        overlay(RoundedRectangle(cornerRadius: radius, style: .continuous).strokeBorder(color, lineWidth: width))
+    }
+
+    /// เลื่อนได้แต่ไม่มี scrollbar + จางขอบบน/ล่าง
+    func wfFade(top: CGFloat = 0, bottom: CGFloat = 40) -> some View {
+        mask(
+            VStack(spacing: 0) {
+                if top > 0 { LinearGradient(colors: [.clear, .black], startPoint: .top, endPoint: .bottom).frame(height: top) }
+                Color.black
+                if bottom > 0 { LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom).frame(height: bottom) }
+            }
+        )
+    }
+}
+
+struct PageTitle: View {
+    let title: String
+    var subtitle: String?
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title).font(Theme.rounded(27, .bold)).tracking(-0.3).foregroundStyle(Theme.ink)
+            if let subtitle { Text(subtitle).font(.system(size: 14)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true) }
+        }
+    }
+}
+
+struct SectionTitle: View {
+    let title: String
+    var note: String?
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(title).font(Theme.rounded(16, .semibold)).foregroundStyle(Theme.ink)
+            if let note { Text(note).font(.system(size: 12.5)).foregroundStyle(Theme.muted2) }
+        }
+        .padding(.leading, 4)
+    }
+}
+
+/// ปุ่มลัดแบบปุ่มคีย์บอร์ดเล็ก
+struct Keycap: View {
+    let text: String
+    var body: some View {
+        Text(text.count == 1 ? text.uppercased() : text)
+            .font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.ink)
+            .padding(.horizontal, 7).frame(minWidth: 24, minHeight: 22)
+            .background(
+                ZStack {
+                    RoundedRectangle(cornerRadius: 7, style: .continuous).fill(Theme.keycapEdge).offset(y: 1)
+                    RoundedRectangle(cornerRadius: 7, style: .continuous).fill(Theme.chip)
+                }
+            )
+            .wfOutline(7, Theme.keycapEdge)
+    }
+}
+
+struct Keycaps: View {
+    let combo: KeyCombo?
+    var body: some View {
+        HStack(spacing: 4) {
+            if let combo, !combo.isEmpty { ForEach(Keys2.sorted(combo), id: \.self) { Keycap(text: Keys2.label($0)) } }
+            else { Text("Not set").font(.system(size: 12)).foregroundStyle(Theme.faint) }
+        }
+    }
+}
+
+struct PrimaryButtonStyle: ButtonStyle {
+    var enabled = true
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 13, weight: .semibold)).foregroundStyle(.white)
+            .padding(.horizontal, 16).padding(.vertical, 7)
+            .background(Capsule().fill(configuration.isPressed ? Theme.accentPressed : Theme.accent))
+            .opacity(enabled ? 1 : 0.45)
+    }
+}
+
+struct PillButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 12.5, weight: .medium)).foregroundStyle(Theme.inkSecondary)
+            .padding(.horizontal, 11).padding(.vertical, 5)
+            .background(Capsule().fill(Theme.pillBtn))
+            .scaleEffect(configuration.isPressed ? 0.96 : 1)
+    }
+}
+
+/// สถานะ hover ต่อแถว (ไม่ใช้ @State — CLT ไม่มี SwiftUI macro)
+final class HoverState: ObservableObject { @Published var on = false }
+
+/// ไอคอนแอป 34pt — ไอคอนจริงจากเครื่อง หรือวงกลมสีพร้อมตัวอักษรแรก
+struct AppBadge: View {
+    let app: String
+    let bundle: String?
+    var size: CGFloat = 34
+    var body: some View {
+        if let img = AppIcons.icon(app: app, bundle: bundle) {
+            Image(nsImage: img).resizable().interpolation(.high).frame(width: size, height: size)
+        } else {
+            Circle().fill(Self.color(app)).frame(width: size, height: size)
+                .overlay(Text(String(app.prefix(1)).uppercased()).font(.system(size: size * 0.38, weight: .semibold)).foregroundStyle(.white))
+        }
+    }
+    static func color(_ app: String) -> Color {
+        let palette: [UInt32] = [0x7A5AA6, 0x22A447, 0x2F7FF0, 0xD9A20B, 0x2FA851, 0xC96A48]
+        return Color(hex: palette[abs(app.hashValue) % palette.count])
+    }
+}
+
+// MARK: - โครงหน้าต่าง
 
 struct HubView: View {
     @ObservedObject var m: HubModel
@@ -176,449 +405,285 @@ struct HubView: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            sidebar.frame(width: 206)
+            sidebar.frame(width: 212)
             page
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                .background(Theme.paper)
+                .background(Theme.contentBg)
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(Theme.line, lineWidth: 1))
-                .padding([.top, .trailing, .bottom], 8)
+                .wfOutline(12, Color(hex: 0x3C2814, alpha: 0.08), 0.5)
+                .padding([.top, .trailing, .bottom], 10)
         }
-        .background(Theme.canvas)
+        .background(Theme.windowBg)
         .foregroundStyle(Theme.ink)
         .environment(\.colorScheme, .light)
+        .tint(Theme.accent)
         .frame(minWidth: 940, minHeight: 640)
     }
 
-    // MARK: แถบซ้าย
-
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 2) {
-            HStack(spacing: 7) {
-                Image(systemName: "waveform").font(.system(size: 17, weight: .bold))
-                Text("WhisperFirst").font(.system(size: 17, weight: .bold)).tracking(-0.3)
-            }
-            .padding(.horizontal, 16).padding(.top, 46).padding(.bottom, 16)
-            ForEach(HubModel.Page.main) { navItem($0) }
+            Spacer().frame(height: 46)   // ใต้ปุ่มแดง/เหลือง/เขียว 30pt
+            ForEach(HubModel.Page.main) { NavItem(m: m, page: $0) }
             Spacer()
-            readiness.padding(.horizontal, 10).padding(.bottom, 10)
-            ForEach(HubModel.Page.bottom) { navItem($0) }
-            Spacer().frame(height: 12)
+            ForEach(HubModel.Page.bottom) { NavItem(m: m, page: $0) }
         }
+        .padding(.top, 0).padding(.horizontal, 12).padding(.bottom, 14)
     }
-
-    private var readiness: some View {
-        let ok = AX.trusted && Keys.gemini != nil
-        return VStack(alignment: .leading, spacing: 6) {
-            Text(ok ? "Ready" : "Setup incomplete").font(.system(size: 12, weight: .semibold))
-            HStack(spacing: 4) {
-                Text("Hold").font(.system(size: 11)).foregroundStyle(Theme.muted)
-                ForEach(m.settings.shortcuts.combos(.pushToTalk).first.map(Keys2.sorted) ?? [], id: \.self) { keyCap(Keys2.label($0)) }
-                Text("to dictate").font(.system(size: 11)).foregroundStyle(Theme.muted)
-            }
-            Capsule().fill(Theme.line).frame(height: 4)
-                .overlay(alignment: .leading) { Capsule().fill(Theme.ink).frame(width: ok ? 150 : 50, height: 4) }
-        }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 10).fill(Theme.paper))
-        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.line))
-    }
-
-    private func navItem(_ p: HubModel.Page) -> some View {
-        let on = m.page == p
-        return Button { m.page = p } label: {
-            HStack(spacing: 9) {
-                Image(systemName: p.icon).font(.system(size: 13)).frame(width: 18)
-                Text(p.title).font(.system(size: 13.5, weight: on ? .medium : .regular))
-                Spacer()
-            }
-            .padding(.horizontal, 9).padding(.vertical, 6.5)
-            .background(RoundedRectangle(cornerRadius: 7).fill(on ? Theme.selected : .clear))
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .padding(.horizontal, 8)
-    }
-
-    // MARK: หน้า
 
     @ViewBuilder private var page: some View {
         switch m.page {
-        case .dictation: scroll(DictationPage(m: m))
-        case .dictionary: scroll(DictionaryPage(d: m.dictionary))
+        case .home: scroll(HomePage(m: m, overlay: m.overlay))
+        case .history: HistoryPage(m: m, scrollable: scrollable)
+        case .dictionary: scroll(DictionaryPage(d: m.dictionary, shortcuts: m.settings.shortcuts))
         case .style: scroll(StylePage(m: m))
-        case .shortcuts: ShortcutsTab(m: m.settings.shortcuts, scrollable: scrollable)
-        case .settings: SettingsPage(s: m.settings)
+        case .shortcuts: scroll(ShortcutsTab(m: m.settings.shortcuts))
+        case .settings: scroll(SettingsPage(s: m.settings, checkup: m.checkup))
         case .help: scroll(HelpPage(m: m))
         }
     }
 
     @ViewBuilder private func scroll<V: View>(_ v: V) -> some View {
-        if scrollable { ScrollView { v.padding(.horizontal, 36).padding(.vertical, 32) } }
-        else { v.padding(.horizontal, 36).padding(.vertical, 32) }
+        let padded = v.padding(.horizontal, 40).padding(.top, 34).padding(.bottom, 40).frame(maxWidth: .infinity, alignment: .leading)
+        if scrollable { ScrollView { padded }.scrollIndicators(.hidden).wfFade(bottom: 40) } else { padded }
     }
 }
 
-func keyCap(_ s: String) -> some View {
-    Text(s).font(.system(size: 11, weight: .medium))
-        .padding(.horizontal, 5).padding(.vertical, 1.5)
-        .background(RoundedRectangle(cornerRadius: 4).fill(Theme.paper))
-        .overlay(RoundedRectangle(cornerRadius: 4).stroke(Theme.line))
-}
-
-private func outlined<V: View>(_ radius: CGFloat = 12, @ViewBuilder _ content: () -> V) -> some View {
-    content()
-        .background(RoundedRectangle(cornerRadius: radius).fill(Theme.paper))
-        .overlay(RoundedRectangle(cornerRadius: radius).stroke(Theme.line))
-}
-
-private func blackButton(_ title: String, _ action: @escaping () -> Void) -> some View {
-    Button(action: action) {
-        Text(title).font(.system(size: 13, weight: .medium)).foregroundStyle(.white)
-            .padding(.horizontal, 14).padding(.vertical, 7)
-            .background(RoundedRectangle(cornerRadius: 8).fill(Theme.ink))
-    }
-    .buttonStyle(.plain)
-}
-
-// MARK: พิมพ์ด้วยเสียง (หน้าหลัก)
-
-private struct DictationPage: View {
+private struct NavItem: View {
     @ObservedObject var m: HubModel
+    let page: HubModel.Page
+    @StateObject private var hover = HoverState()
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 22) {
-            Text("Welcome back, \(Store.config.displayName)").font(.system(size: 21, weight: .semibold))
-            HStack(alignment: .top, spacing: 18) {
-                VStack(alignment: .leading, spacing: 26) {
-                    banner
-                    history
-                }
-                .frame(maxWidth: .infinity)
-                statsCard.frame(width: 200)
-            }
-        }
-    }
-
-    private var banner: some View {
-        ZStack(alignment: .leading) {
-            Color.black
-            // แสงอุ่นๆ ฟุ้งด้านขวา (แทนภาพถ่าย)
-            GeometryReader { g in
-                ZStack {
-                    Circle().fill(Color(red: 0.98, green: 0.62, blue: 0.25)).frame(width: 240).offset(x: g.size.width * 0.32, y: -10).blur(radius: 60)
-                    Circle().fill(Color(red: 0.85, green: 0.30, blue: 0.20)).frame(width: 160).offset(x: g.size.width * 0.18, y: 40).blur(radius: 55)
-                    Circle().fill(Color(red: 1.0, green: 0.85, blue: 0.55)).frame(width: 90).offset(x: g.size.width * 0.38, y: 10).blur(radius: 30)
-                }
-                .frame(width: g.size.width, height: g.size.height)
-                .opacity(0.9)
-            }
-            VStack(alignment: .leading, spacing: 8) {
-                (Text("Make WhisperFirst sound like ").font(Theme.serif(25)) + Text("you").font(Theme.serif(25).italic()))
-                    .foregroundStyle(.white)
-                Text("Set up different writing styles for different apps.").font(.system(size: 13)).foregroundStyle(.white.opacity(0.8))
-                Button { m.page = .style } label: {
-                    Text("Start now").font(.system(size: 13, weight: .medium)).foregroundStyle(Theme.ink)
-                        .padding(.horizontal, 14).padding(.vertical, 7)
-                        .background(RoundedRectangle(cornerRadius: 7).fill(.white))
-                }
-                .buttonStyle(.plain)
-                .padding(.top, 8)
-            }
-            .padding(.horizontal, 26)
-        }
-        .frame(height: 140)
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-    }
-
-    private var statsCard: some View {
-        let st = m.stats
-        return outlined {
-            VStack(alignment: .leading, spacing: 0) {
-                VStack(alignment: .leading, spacing: 12) {
-                    statLine("\(st.words.formatted())", "total words")
-                    statLine("\(st.wpm)", "wpm")
-                    statLine("\(st.streak)", "day streak")
-                }
-                .padding(18)
-                Rectangle().fill(Theme.line).frame(height: 1)
-                VStack(alignment: .leading, spacing: 6) {
-                    (Text("\(st.savedMinutes) min").font(.system(size: 13, weight: .semibold)).foregroundColor(Color(red: 0.85, green: 0.42, blue: 0.13))
-                        + Text(" saved").font(.system(size: 13, weight: .medium)))
-                    Text("vs. typing at ~35 words per minute").font(.system(size: 11)).foregroundStyle(Theme.muted)
-                }
-                .padding(18)
-            }
-        }
-    }
-
-    private func statLine(_ v: String, _ label: String) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 6) {
-            Text(v).font(Theme.serif(22))
-            Text(label).font(.system(size: 12.5)).foregroundStyle(Theme.muted)
-        }
-    }
-
-    @ViewBuilder private var history: some View {
-        let groups = m.grouped
-        if m.entries.isEmpty {
-            Text("No dictations yet — hold your shortcut and speak in any app").font(.system(size: 13)).foregroundStyle(Theme.muted)
-        }
-        ForEach(Array(groups.enumerated()), id: \.offset) { i, g in
-            VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    Text(g.0.uppercased()).font(.system(size: 11, weight: .semibold)).tracking(0.6).foregroundStyle(Theme.muted)
-                    Spacer()
-                    if i == 0 {
-                        if m.searching {
-                            TextField("Search", text: $m.search).textFieldStyle(.plain).font(.system(size: 12.5)).frame(width: 180)
-                        }
-                        Button { m.searching.toggle(); if !m.searching { m.search = "" } } label: {
-                            Image(systemName: m.searching ? "xmark" : "magnifyingglass").font(.system(size: 12)).foregroundStyle(Theme.muted)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                outlined(10) {
-                    VStack(spacing: 0) {
-                        ForEach(Array(g.1.enumerated()), id: \.element.id) { j, e in
-                            if j > 0 { Rectangle().fill(Theme.line).frame(height: 1) }
-                            HistoryRow(m: m, e: e)
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-private struct HistoryRow: View {
-    @ObservedObject var m: HubModel
-    let e: HistoryEntry
-
-    var body: some View {
-        let hover = m.hovered == e.id
-        HStack(alignment: .top, spacing: 0) {
-            Text(HubModel.timeFmt.string(from: Date(timeIntervalSince1970: e.t)))
-                .font(.system(size: 12)).foregroundStyle(Theme.muted)
-                .frame(width: 76, alignment: .leading)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(e.text).font(.system(size: 13.5)).textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading).fixedSize(horizontal: false, vertical: true)
-                if hover {
-                    Text("\(e.app.isEmpty ? "-" : e.app) · spoke \(String(format: "%.1f", e.sec))s · ready in \(String(format: "%.1f", Double(e.ms) / 1000))s\(e.mode == "command" ? " · command" : "")")
-                        .font(.system(size: 11)).foregroundStyle(Theme.muted)
-                }
-            }
-            HStack(spacing: 12) {
-                icon(m.copiedID == e.id ? "checkmark" : "doc.on.doc", "Copy") { m.copy(e) }
-                icon("trash", "Delete") { m.delete(e) }
-            }
-            .opacity(hover ? 1 : 0)
-            .padding(.leading, 12)
-        }
-        .padding(.horizontal, 14).padding(.vertical, 12)
-        .background(hover ? Theme.hover : Theme.paper)
-        .contentShape(Rectangle())
-        .onHover { inside in
-            if inside { m.hovered = e.id } else if m.hovered == e.id { m.hovered = nil }
-        }
-    }
-
-    private func icon(_ name: String, _ help: String, _ action: @escaping () -> Void) -> some View {
-        Button(action: action) { Image(systemName: name).font(.system(size: 12.5)).foregroundStyle(Theme.muted) }
-            .buttonStyle(.plain).help(help)
-    }
-}
-
-// MARK: พจนานุกรม
-
-private struct DictionaryPage: View {
-    @ObservedObject var d: DictionaryModel
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            HStack(alignment: .center) {
-                Text("Dictionary").font(.system(size: 21, weight: .semibold))
+        let on = m.page == page
+        Button { m.page = page } label: {
+            HStack(spacing: 10) {
+                Image(systemName: page.icon).font(.system(size: 15)).frame(width: 18)
+                    .foregroundStyle(on ? Theme.accent : Theme.muted2)
+                Text(page.title).font(.system(size: 13.5, weight: on ? .semibold : .regular)).foregroundStyle(Theme.ink)
                 Spacer()
-                Toggle("Edit as text", isOn: $d.rawMode).toggleStyle(.switch).controlSize(.mini).font(.system(size: 12))
-                blackButton("Add new") { d.adding = true; d.rawMode = false }
             }
-            Text("Names, projects and jargon you want spelled right every time · Select a word in any app and press ⌃⌥D to add it · WhisperFirst also learns words you correct after pasting")
-                .font(.system(size: 13)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
-            if d.rawMode {
-                TextFileTab(m: d.raw, hint: "One word per line · heard => correct (always replaced) · heard ~> correct (hint for the model)")
-                    .frame(minHeight: 420)
-                    .onDisappear { d.load() }
-            } else {
-                if d.adding {
-                    outlined(10) {
-                        HStack {
-                            TextField("Type a word and press Enter — e.g. a friend's name or a brand", text: $d.newWord)
-                                .textFieldStyle(.plain).font(.system(size: 13.5)).onSubmit { d.add() }
-                            Button("Cancel") { d.adding = false; d.newWord = "" }.buttonStyle(.plain).foregroundStyle(Theme.muted)
-                            blackButton("Add") { d.add() }
-                        }
-                        .padding(.horizontal, 14).padding(.vertical, 8)
-                    }
-                }
-                list("My words", d.words.map { ($0, nil, $0) })
-                if !d.learned.isEmpty {
-                    list("Learned from your edits", d.learned.map { ($0.1, "heard as \"\($0.0)\"", "\($0.0) ~> \($0.1)") })
-                }
-                if !d.fixes.isEmpty {
-                    list("Replacements", d.fixes.map { ($0.1, "replaces \"\($0.0)\"", "\($0.0) => \($0.1)") })
-                }
-            }
-        }
-    }
-
-    private func list(_ title: String, _ rows: [(word: String, note: String?, line: String)]) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("\(title.uppercased()) · \(rows.count)").font(.system(size: 11, weight: .semibold)).tracking(0.6).foregroundStyle(Theme.muted)
-            outlined(10) {
-                VStack(spacing: 0) {
-                    ForEach(Array(rows.enumerated()), id: \.element.line) { i, r in
-                        if i > 0 { Rectangle().fill(Theme.line).frame(height: 1) }
-                        let hover = d.hovered == r.line
-                        HStack {
-                            Text(r.word).font(.system(size: 13.5))
-                            if let note = r.note { Text(note).font(.system(size: 11.5)).foregroundStyle(Theme.muted) }
-                            Spacer()
-                            Button { d.remove(line: r.line) } label: { Image(systemName: "trash").font(.system(size: 12)).foregroundStyle(Theme.muted) }
-                                .buttonStyle(.plain).opacity(hover ? 1 : 0).help("Delete")
-                        }
-                        .padding(.horizontal, 14).padding(.vertical, 10)
-                        .background(hover ? Theme.hover : Theme.paper)
-                        .contentShape(Rectangle())
-                        .onHover { inside in if inside { d.hovered = r.line } else if d.hovered == r.line { d.hovered = nil } }
-                    }
-                }
-            }
-        }
-    }
-}
-
-// MARK: สไตล์
-
-private struct StylePage: View {
-    @ObservedObject var m: HubModel
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            Text("Style").font(.system(size: 21, weight: .semibold))
-            HStack(spacing: 22) {
-                ForEach(StyleCategory.allCases) { c in
-                    Button { m.styleTab = c } label: {
-                        VStack(spacing: 7) {
-                            Text(c.title).font(.system(size: 13.5, weight: m.styleTab == c ? .semibold : .regular))
-                                .foregroundStyle(m.styleTab == c ? Theme.ink : Theme.muted)
-                            Rectangle().fill(m.styleTab == c ? Theme.ink : .clear).frame(height: 2)
-                        }
-                        .fixedSize()
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .overlay(alignment: .bottom) { Rectangle().fill(Theme.line).frame(height: 1).offset(y: 0.5) }
-            Text("This style applies in \(m.styleTab.apps) · Only formatting and punctuation change — never your words")
-                .font(.system(size: 12.5)).foregroundStyle(Theme.muted)
-            HStack(alignment: .top, spacing: 14) {
-                ForEach(WritingStyle.allCases) { s in styleCard(s) }
-            }
-            VStack(alignment: .leading, spacing: 8) {
-                Text("About you".uppercased()).font(.system(size: 11, weight: .semibold)).tracking(0.6).foregroundStyle(Theme.muted)
-                TextFileTab(m: m.settings.aboutMe, hint: "Describe your work, common jargon and how you like to write — it helps WhisperFirst guess words and tone")
-                    .frame(minHeight: 170)
-            }
-            .padding(.top, 8)
-        }
-    }
-
-    private func styleCard(_ s: WritingStyle) -> some View {
-        let on = m.styles[m.styleTab] == s
-        return Button { m.setStyle(s, for: m.styleTab) } label: {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(s.title + (s == .formal ? "." : "")).font(Theme.serif(26))
-                Text(s.subtitle).font(.system(size: 12)).foregroundStyle(Theme.muted)
-                Text(s.example)
-                    .font(.system(size: 12.5)).lineSpacing(3)
-                    .frame(maxWidth: .infinity, minHeight: 120, alignment: .topLeading)
-                    .padding(12)
-                    .background(RoundedRectangle(cornerRadius: 10).fill(Theme.canvas))
-                    .padding(.top, 14)
-            }
-            .padding(16)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(RoundedRectangle(cornerRadius: 12).fill(Theme.paper))
-            .overlay(RoundedRectangle(cornerRadius: 12).stroke(on ? Theme.ink : Theme.line, lineWidth: on ? 1.5 : 1))
+            .padding(.horizontal, 12).frame(height: 34)
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(on ? Theme.card : (hover.on ? Color.black.opacity(0.035) : .clear))
+                    .shadow(color: on ? Theme.shadowTint.opacity(0.1) : .clear, radius: 1, y: 1)
+            )
+            .wfOutline(10, on ? Color(hex: 0x3C2814, alpha: 0.06) : .clear, 0.5)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .onHover { hover.on = $0 }
     }
 }
 
-// MARK: วิธีใช้
+// MARK: - Home
 
-private struct HelpPage: View {
+private struct HomePage: View {
     @ObservedObject var m: HubModel
+    @ObservedObject var overlay: OverlayModel
 
     var body: some View {
+        let st = m.stats
         VStack(alignment: .leading, spacing: 18) {
-            Text("Help").font(.system(size: 21, weight: .semibold))
-            outlined {
-                VStack(spacing: 0) {
-                    row(m.settings.shortcuts.combos(.pushToTalk).first, "Push to talk", "Release to paste into the current app")
-                    divider
-                    row(m.settings.shortcuts.combos(.handsFree).first, "Hands-free", "Press to start, press again to stop — or double-tap push to talk")
-                    divider
-                    row(["shift"], "Command mode", "Press while speaking, then say e.g. \"translate to English\" for the selected text")
-                    divider
-                    row(["k:53"], "Cancel", "While speaking or waiting for the result")
-                    divider
-                    row(m.settings.shortcuts.combos(.addWord).first, "Teach a word", "Select a word in any app, then press")
-                }
-            }
-            HStack(alignment: .center, spacing: 16) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Dynamic Island").font(Theme.serif(20))
-                    Text("The island at the top of your screen shows everything from the moment you speak until text is pasted — waveform, live transcript, the pasted text, retry.")
-                        .font(.system(size: 12.5)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
-                }
+            PageTitle(title: "\(m.greeting), \(Store.config.displayName)", subtitle: "Talk the way you normally would. WhisperFirst tidies it up.")
+                .padding(.bottom, 4)
+            holdCard
+            statsCard(st)
+            HStack {
+                SectionTitle(title: "Lately")
                 Spacer()
-                blackButton("Play demo") { m.onDemo() }
+                if !m.entries.isEmpty {
+                    Button("See everything") { m.page = .history }.buttonStyle(.plain)
+                        .font(.system(size: 13, weight: .medium)).foregroundStyle(Theme.accentText)
+                }
             }
-            .padding(18)
-            .background(RoundedRectangle(cornerRadius: 12).fill(Theme.canvas))
+            .padding(.top, 6)
+            if m.entries.isEmpty {
+                Text("Nothing yet — hold the key and say something in any app.")
+                    .font(.system(size: 14)).foregroundStyle(Theme.muted2)
+                    .frame(maxWidth: .infinity).padding(.vertical, 26).wfCard()
+            } else {
+                VStack(spacing: 0) { ForEach(m.entries.prefix(3)) { EntryRow(m: m, e: $0, wrap: false, deletable: false) } }
+                    .padding(6).wfCard()
+            }
         }
     }
 
-    private var divider: some View { Rectangle().fill(Theme.line).frame(height: 1) }
-
-    private func row(_ combo: KeyCombo?, _ title: String, _ detail: String) -> some View {
-        HStack(spacing: 14) {
-            HStack(spacing: 4) {
-                if let combo { ForEach(Keys2.sorted(combo), id: \.self) { keyCap(Keys2.label($0)) } } else { Text("Not set").font(.system(size: 11)).foregroundStyle(Theme.muted) }
-            }
-            .frame(width: 120, alignment: .leading)
-            Text(title).font(.system(size: 13.5, weight: .medium)).frame(width: 110, alignment: .leading)
-            Text(detail).font(.system(size: 12.5)).foregroundStyle(Theme.muted)
-            Spacer()
+    private var hint: String {
+        switch overlay.phase {
+        case .listening: overlay.handsFree ? "Hands-free — press ✓ on the island when you're done" : "Listening… let go when you're done"
+        case .thinking: "Polishing…"
+        case .done: "Done — it's at the top of Lately"
+        default: "Try it: press and hold the key →"
         }
-        .padding(.horizontal, 16).padding(.vertical, 12)
+    }
+
+    private var holdCard: some View {
+        HStack(alignment: .center, spacing: 28) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Hold to talk").font(Theme.rounded(21, .semibold))
+                Text("Press and hold the key, say what you want to write, then let go. It appears right where your cursor is — in any app. Double-tap it to talk hands-free.")
+                    .font(.system(size: 14)).foregroundStyle(Theme.inkSecondary).lineSpacing(4).fixedSize(horizontal: false, vertical: true)
+                Text(hint).font(.system(size: 13, weight: .medium)).foregroundStyle(Theme.accentText).padding(.top, 4)
+                    .animation(.easeOut(duration: 0.2), value: overlay.phase)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            BigKeycap(combo: m.settings.shortcuts.combos(.pushToTalk).first,
+                      pressed: overlay.phase == .listening && !overlay.handsFree)
+        }
+        .padding(.vertical, 24).padding(.horizontal, 28)
+        .wfCard(18)
+    }
+
+    private func statsCard(_ st: HubModel.Stats) -> some View {
+        let saved = st.savedMinutes >= 60 ? "\(st.savedMinutes / 60) \(st.savedMinutes / 60 == 1 ? "hour" : "hours")"
+            : "\(st.savedMinutes) \(st.savedMinutes == 1 ? "minute" : "minutes")"
+        return HStack(spacing: 14) {
+            (Text("You've spoken ") + Text("\(st.words.formatted()) words").bold().foregroundColor(Theme.ink)
+             + Text(" so far — about ") + Text(saved).bold().foregroundColor(Theme.ink) + Text(" you didn't spend typing."))
+                .font(.system(size: 15)).foregroundStyle(Theme.inkSecondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            if st.streak > 0 {
+                Text("\(st.streak) \(st.streak == 1 ? "day" : "days") in a row")
+                    .font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.accentSoftText)
+                    .padding(.horizontal, 10).padding(.vertical, 4)
+                    .background(Capsule().fill(Theme.accentSoft))
+            }
+        }
+        .padding(.vertical, 17).padding(.horizontal, 22)
+        .wfCard()
     }
 }
 
-// MARK: ตั้งค่า
+/// ปุ่มคีย์บอร์ดใหญ่บน Home — ยุบลงตอนกำลังฟัง
+private struct BigKeycap: View {
+    let combo: KeyCombo?
+    let pressed: Bool
 
-private struct SettingsPage: View {
-    @ObservedObject var s: SettingsModel
+    var body: some View {
+        let (symbol, caption) = Self.face(combo)
+        ZStack {
+            RoundedRectangle(cornerRadius: 22, style: .continuous).fill(Theme.keycapEdge)
+                .offset(y: pressed ? 1 : 5)
+            ZStack(alignment: .topLeading) {
+                RoundedRectangle(cornerRadius: 22, style: .continuous).fill(.white)
+                    .wfOutline(22, Color(hex: 0xE8E1D8))
+                VStack(alignment: .leading) {
+                    HStack { Spacer(); Text(symbol).font(.system(size: 30, weight: .regular)).foregroundStyle(Theme.ink) }
+                    Spacer()
+                    Text(caption).font(.system(size: 12)).foregroundStyle(Theme.muted)
+                }
+                .padding(.horizontal, 16).padding(.vertical, 12)
+            }
+            .offset(y: pressed ? 4 : 0)
+        }
+        .frame(width: 124, height: 108)
+        .shadow(color: Theme.shadowTint.opacity(0.12), radius: 13, y: 12)
+        .animation(.easeOut(duration: 0.08), value: pressed)
+    }
+
+    static func face(_ combo: KeyCombo?) -> (String, String) {
+        guard let c = combo, !c.isEmpty else { return ("?", "not set") }
+        if c.count == 1 {
+            switch c[0] {
+            case "ropt": return ("⌥", "right option")
+            case "lopt": return ("⌥", "left option")
+            case "rcmd": return ("⌘", "right command")
+            case "lcmd": return ("⌘", "left command")
+            case "rctrl": return ("⌃", "right control")
+            case "lctrl": return ("⌃", "left control")
+            case "fn": return ("🌐", "fn / globe")
+            default: break
+            }
+        }
+        return (Keys2.sorted(c).map { Keys2.label($0) }.map { $0.count == 1 ? $0.uppercased() : $0 }.joined(separator: " "), "")
+    }
+}
+
+/// แถวประวัติ (Home: บรรทัดเดียว · History: ข้อความเต็ม + ปุ่มลบ)
+struct EntryRow: View {
+    @ObservedObject var m: HubModel
+    let e: HistoryEntry
+    let wrap: Bool
+    let deletable: Bool
+    @StateObject private var hover = HoverState()
+
+    var body: some View {
+        let copied = m.copiedID == e.id
+        HStack(alignment: wrap ? .top : .center, spacing: 14) {
+            AppBadge(app: e.app, bundle: e.bundle)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(e.text).font(.system(size: 14)).foregroundStyle(Theme.ink)
+                    .lineLimit(wrap ? nil : 1).truncationMode(.tail)
+                    .fixedSize(horizontal: false, vertical: wrap)
+                    .textSelection(.enabled)
+                Text("\(e.app.isEmpty ? "WhisperFirst" : e.app) · \(HubModel.timeFmt.string(from: Date(timeIntervalSince1970: e.t)))")
+                    .font(.system(size: 12)).foregroundStyle(Theme.muted2)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            HStack(spacing: 8) {
+                Button { m.copy(e) } label: {
+                    Label(copied ? "Copied" : "Copy", systemImage: copied ? "checkmark" : "doc.on.doc")
+                }
+                .buttonStyle(PillButtonStyle())
+                if deletable {
+                    Button { m.delete(e) } label: {
+                        Image(systemName: "trash").font(.system(size: 12)).foregroundStyle(Theme.muted)
+                            .frame(width: 30, height: 30).background(Circle().fill(Theme.pillBtn))
+                    }
+                    .buttonStyle(.plain).help("Delete")
+                }
+            }
+            .opacity(hover.on || copied ? 1 : 0)
+            .animation(.easeOut(duration: 0.15), value: hover.on)
+        }
+        .padding(.horizontal, 14).padding(.vertical, 11)
+        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(hover.on ? Theme.hoverRow : .clear))
+        .contentShape(Rectangle())
+        .onHover { hover.on = $0 }
+    }
+}
+
+// MARK: - History
+
+private struct HistoryPage: View {
+    @ObservedObject var m: HubModel
+    let scrollable: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("Settings").font(.system(size: 21, weight: .semibold)).padding(.horizontal, 36).padding(.top, 32).padding(.bottom, 4)
-            GeneralTab(vm: s).scrollContentBackground(.hidden)
+            HStack(alignment: .center) {
+                PageTitle(title: "Everything you've said")
+                Spacer()
+                HStack(spacing: 8) {
+                    Image(systemName: "magnifyingglass").font(.system(size: 13)).foregroundStyle(Theme.faint)
+                    TextField("Find a word or an app", text: $m.search).textFieldStyle(.plain).font(.system(size: 13))
+                }
+                .padding(.horizontal, 14).frame(width: 240, height: 36)
+                .background(Capsule().fill(Theme.card))
+                .overlay(Capsule().strokeBorder(Theme.stroke, lineWidth: 1))
+            }
+            .padding(.horizontal, 40).padding(.top, 34).padding(.bottom, 14)
+            if scrollable { ScrollView { list }.scrollIndicators(.hidden).wfFade(top: 16, bottom: 40) } else { list }
         }
+    }
+
+    private var list: some View {
+        let groups = m.grouped
+        return VStack(alignment: .leading, spacing: 18) {
+            if groups.isEmpty {
+                Text(m.search.isEmpty ? "Nothing here yet — hold the key and say something." : "Nothing matches \"\(m.search)\" yet")
+                    .font(.system(size: 14)).foregroundStyle(Theme.muted2)
+                    .frame(maxWidth: .infinity).padding(.top, 40)
+            }
+            ForEach(groups, id: \.0) { day, items in
+                VStack(alignment: .leading, spacing: 10) {
+                    Text(day).font(Theme.rounded(15, .semibold)).padding(.leading, 4)
+                    VStack(spacing: 0) { ForEach(items) { EntryRow(m: m, e: $0, wrap: true, deletable: true) } }
+                        .padding(6).wfCard()
+                }
+            }
+        }
+        .padding(.horizontal, 40).padding(.top, 8).padding(.bottom, 40)
     }
 }

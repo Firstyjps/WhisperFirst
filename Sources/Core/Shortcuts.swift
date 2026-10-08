@@ -18,19 +18,19 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
         case .handsFree: "Hands-free mode"
         case .commandMode: "Command mode"
         case .pressEnter: "Press Enter"
-        case .pasteLast: "Paste last transcript"
+        case .pasteLast: "Paste last text"
         case .addWord: "Add word to dictionary"
         }
     }
 
     var detail: String {
         switch self {
-        case .pushToTalk: "Hold to say something short, release to paste"
-        case .handsFree: "Dictate hands-free — press to start, press again to stop"
-        case .commandMode: "Hold and speak an instruction for the selected text, e.g. \"translate to English\" (or press ⇧ while dictating)"
-        case .pressEnter: "Trigger Enter with a mouse button (or another key) to send messages faster"
-        case .pasteLast: "Paste your most recent transcript again"
-        case .addWord: "Select a word in any app, then press to teach it"
+        case .pushToTalk: "Hold to say something short, let go to paste"
+        case .handsFree: "Press to start, press again to stop — for longer thoughts"
+        case .commandMode: "Hold and say what to do with selected text, like “translate to English”. You can also press ⇧ while talking."
+        case .pressEnter: "Send messages faster — map Enter to a mouse button or another key"
+        case .pasteLast: "Paste the most recent thing you said, again"
+        case .addWord: "Select a word in any app, then press"
         }
     }
 

@@ -80,14 +80,15 @@ python3 bench/run.py gemini:gemini-3.1-flash-lite elevenlabs   # เทียบ
 แก้ prompt ที่ `prompts/*.md` แล้ว `./build.sh` (ติดตั้งทับใน Application Support)
 
 ## For designers — UI map
-Native SwiftUI + AppKit, built with Command Line Tools only (no Xcode). **SwiftUI macros are unavailable** → never use `@State`/`@Observable`; keep view state in `ObservableObject` models with `@Published` (see existing models).
+Native SwiftUI + AppKit, built with Command Line Tools only (no Xcode). **SwiftUI macros are unavailable** → never use `@State`/`@Observable`; keep view state in `ObservableObject` models with `@Published`. `@StateObject` works (used for per-row hover via `HoverState`).
 
 | Surface | File | Notes |
 |---|---|---|
-| Main window (Dictation · Dictionary · Style · Shortcuts · Settings · Help) | `Sources/Core/MainWindow.swift` | `Theme` holds colors/fonts (cream canvas, white paper card, serif numbers). Always light mode. |
+| Main window shell, Home, History, design tokens (`Theme`) | `Sources/Core/MainWindow.swift` | Handoff Round 3 tokens (cream, accent `#D9732F`, rounded type). Always light mode. Hidden scrollbars + fades. |
+| Dictionary · Writing style · Help pages | `Sources/Core/HubPages.swift` | `FlowLayout`, `Segmented`, `RawEditor` helpers |
 | Dynamic Island (top-center overlay) | `Sources/Core/Overlay.swift` | `OverlayModel.Phase` = idle/hover/listening/thinking/done/message/error/learned; sizes in `OverlayModel.size`; spring morph. |
 | Shortcuts editor | `Sources/Core/ShortcutsView.swift` | Wispr-style cards, ✎ record / 🗑 / + |
-| Settings form | `Sources/Core/Settings.swift` (`GeneralTab`) | |
+| Settings page (check-up, switches, Advanced) | `Sources/Core/Settings.swift` (`SettingsPage`) | `CheckupModel` in MainWindow.swift |
 | Menu bar | `Sources/Core/App.swift` (`menuNeedsUpdate`) | |
 | Writing styles data | `Sources/Core/Styles.swift` | Category × Formal/Casual/Very casual, examples |
 

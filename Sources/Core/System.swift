@@ -150,10 +150,16 @@ struct HistoryEntry: Codable, Identifiable {
     var model: String
     var ms: Int
     var sec: Double
+    /// bundle id ของแอปที่วาง (ไว้แสดงไอคอนจริง) — ประวัติเก่าไม่มี
+    var bundle: String? = nil
 }
 
 enum History {
+    /// ประวัติเปลี่ยน → หน้าต่างหลักโหลดใหม่
+    static let changed = Notification.Name("WFHistoryChanged")
+
     static func append(_ e: HistoryEntry) {
+        defer { DispatchQueue.main.async { NotificationCenter.default.post(name: changed, object: nil) } }
         guard var line = try? JSONEncoder().encode(e) else { return }
         line.append(0x0A)
         if let h = try? FileHandle(forWritingTo: Paths.history) {

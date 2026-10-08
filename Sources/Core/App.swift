@@ -115,7 +115,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     @objc private func addWord() { controller.addSelectionToDictionary() }
     @objc private func undoLearned() { controller.learner.undoLast() }
     @objc private func openSettings() { showSettings() }
-    @objc private func openHub() { showHub(.dictation) }
+    @objc private func openHub() { showHub(.home) }
     @objc private func openFolder() { NSWorkspace.shared.open(Paths.support) }
     @objc private func quit() { NSApp.terminate(nil) }
 
@@ -135,7 +135,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             let vm = SettingsModel(engine: controller.shortcuts)
             vm.onIslandChange = { [weak self] in self?.overlayPanel.applySettings() }
             vm.shortcuts.onChange = { [weak self] in self?.controller.updateHint() }
-            let h = HubModel(settings: vm)
+            let h = HubModel(settings: vm, overlay: controller.overlay)
             h.onDemo = { [weak self] in self?.controller.demoIsland() }
             hub = h
             let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1040, height: 720),
