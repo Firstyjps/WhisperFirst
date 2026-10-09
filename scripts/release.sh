@@ -15,7 +15,8 @@ GOT=$(security find-certificate -c "$SIGN_ID" -Z 2>/dev/null | awk '/SHA-1/{prin
 if [[ -n "$(git status --porcelain -- Sources Package.swift Info.plist WhisperFirst.entitlements prompts defaults Resources)" && "${WF_ALLOW_DIRTY:-}" != 1 ]]; then
   echo "❌ มีไฟล์ที่ยังไม่ commit — commit ก่อน (หรือ WF_ALLOW_DIRTY=1 สำหรับ build ทดสอบ)"; git status --short -- Sources Package.swift Info.plist; exit 1
 fi
-SHA=$(git rev-parse --short HEAD)$([[ -n "$(git status --porcelain -- Sources)" ]] && echo "-dirty")
+SHA=$(git rev-parse --short HEAD)
+[[ -z "$(git status --porcelain -- Sources)" ]] || SHA="$SHA-dirty"
 
 swift build -c release --product WhisperFirst
 BIN_DIR="$(swift build -c release --show-bin-path)"
