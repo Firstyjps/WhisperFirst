@@ -206,6 +206,30 @@ final class ShortcutEngine {
         Log.write("shortcuts: ปิด event tap")
     }
 
+    /// tap หลุดไปชั่วขณะ (เครื่องโหลดหนัก) → event ช่วงนั้นหาย: อ่านสถานะปุ่มจริงจากเครื่องแทนการยกเลิกทิ้ง
+    /// ยังกดค้างอยู่ = พูดต่อ · ปล่อยไปแล้ว = จบตามปกติ (วางข้อความ) — ไม่ทิ้งสิ่งที่พูดไปแล้ว
+    private func resync() -> String {
+        let modifierKeys: [String: UInt16] = ["lctrl": 59, "rctrl": 62, "lshift": 56, "rshift": 60, "lcmd": 55, "rcmd": 54,
+                                              "lopt": 58, "ropt": 61, "fn": 63]
+        for t in pressed {
+            let down: Bool
+            if let c = modifierKeys[t] { down = CGEventSource.keyState(.combinedSessionState, key: c) }
+            else if t.hasPrefix("k:"), let c = UInt16(t.dropFirst(2)) { down = CGEventSource.keyState(.combinedSessionState, key: c) }
+            else if t.hasPrefix("m:"), let n = UInt32(t.dropFirst(2)), let b = CGMouseButton(rawValue: n) {
+                down = CGEventSource.buttonState(.combinedSessionState, button: b)
+            } else { down = false }
+            if !down { pressed.remove(t) }
+        }
+        swallowedKeys = swallowedKeys.filter { pressed.contains("k:\($0)") }
+        swallowedMouse = swallowedMouse.filter { pressed.contains("m:\($0)") }
+        pending = nil
+        guard let a = active else { return "ไม่มีปุ่มค้าง" }
+        if a.combo.allSatisfy(satisfied) { return "ยังกดค้าง \(a.action.rawValue) → พูดต่อ" }
+        active = nil
+        fire(a.action, .up)
+        return "ปล่อย \(a.action.rawValue) ไปแล้วระหว่างหลุด → จบตามปกติ"
+    }
+
     private func resetState() {
         if let a = active, a.action.isHold { fire(a.action, .cancel) }   // ไม่ปล่อยให้ไมค์ค้างรอ keyUp ที่จะไม่มาแล้ว
         pressed.removeAll(); active = nil; pending = nil
@@ -219,8 +243,7 @@ final class ShortcutEngine {
         let pass = Unmanaged.passUnretained(e)
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
             if let tap { CGEvent.tapEnable(tap: tap, enable: true) }
-            Log.write("shortcuts: tap ถูกปิด (\(type == .tapDisabledByTimeout ? "timeout" : "user input")) → เปิดใหม่ + ยกเลิกปุ่มที่ค้าง")
-            resetState()
+            Log.write("shortcuts: tap ถูกปิด (\(type == .tapDisabledByTimeout ? "timeout" : "user input")) → เปิดใหม่ + \(resync())")
             return pass
         }
         if e.getIntegerValueField(.eventSourceUserData) == Self.syntheticMark { return pass }

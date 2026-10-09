@@ -281,9 +281,9 @@ public enum WFCLI {
         feed([flags(59, 0x01 | CGEventFlags.maskControl.rawValue), ctrlOptDown, key(9, true), key(9, false), synthV, synthVUp,
               flags(58, 0x01 | CGEventFlags.maskControl.rawValue), flags(59, 0)])
         check("⌃⌥V แล้ว ⌘V ของแอปเองไม่วนทริกเกอร์ซ้ำ", ["pasteLast.down"], [false, false, true, true, false, false, false, false])
-        // A3: tap ถูกปิดระหว่างกดค้าง → ต้องยกเลิก (ไม่ปล่อยไมค์ค้าง)
+        // A3: tap ถูกปิดระหว่างกดค้าง → อ่านปุ่มจริงจากเครื่อง: ปุ่มจำลองไม่ได้กดอยู่จริง = ปล่อยแล้ว → จบตามปกติ (ไม่ปล่อยไมค์ค้าง ไม่ทิ้งที่พูด)
         feed([roptDown]); _ = e.handle(.tapDisabledByTimeout, CGEvent(source: nil)!); swallowed.append(false); feed([roptUp])
-        check("tap ถูกปิดระหว่างกดค้าง → ยกเลิกทันที", ["pushToTalk.down", "pushToTalk.cancel"])
+        check("tap ถูกปิดระหว่างกดค้าง (ปล่อยไปแล้ว) → จบตามปกติ", ["pushToTalk.down", "pushToTalk.up"])
         // A9: Esc ระหว่างกดค้าง (กำลังพูด) → กลืน + ยกเลิก ไม่หลุดไปแอป
         e.escapeArmed = true
         feed([roptDown, key(53, true), key(53, false), roptUp])

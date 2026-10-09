@@ -78,7 +78,9 @@ final class OnboardingModel: ObservableObject {
     }
 
     func next() {
-        if step == .apiKey, geminiKey.trimmingCharacters(in: .whitespacesAndNewlines) != (Keys.gemini ?? "") { saveKey() }
+        // ช่องว่าง = ข้าม (ไม่ลบ key เดิมทิ้ง)
+        let k = geminiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        if step == .apiKey, !k.isEmpty, k != (Keys.gemini ?? "") { saveKey() }
         if let n = Step(rawValue: step.rawValue + 1) { go(n) } else { onFinish() }
     }
 
@@ -178,52 +180,23 @@ struct OnboardingView: View {
     // MARK: 1 ต้อนรับ
 
     private var welcome: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            HStack(spacing: 16) {
-                Image(nsImage: NSApplication.shared.applicationIconImage).resizable().frame(width: 64, height: 64)
-                    .popIn().drift(y: -3, duration: 1.8)
-                PageTitle(title: "Welcome to WhisperFirst", subtitle: "Talk instead of typing — in any app. Thai, English, or both.")
-                    .reveal(0)
-            }
-            VStack(spacing: 0) {
-                howRow("keyboard", 0xFBEADB, 0xC8641F, "Hold \(m.pushToTalkText)", "Wherever your cursor is — Line, Gmail, Notes, anywhere")
-                Rectangle().fill(Theme.hairline).frame(height: 1)
-                howRow("mic", 0xFDE7EA, 0xD9475A, "Just talk", "Pauses, “เอ่อ” and changing your mind are fine")
-                Rectangle().fill(Theme.hairline).frame(height: 1)
-                howRow("character.cursor.ibeam", 0xE6F4EA, 0x2E8B4E, "Let go", "Clean text is typed for you in about 2 seconds")
-            }
-            .wfCard()
-            .reveal(1)
-            HStack(alignment: .top, spacing: 12) {
-                example("YOU SAY", "เอ่อ พรุ่งนี้ประชุมตอน 10 โมง เอ้ย ไม่ใช่ 10 โมงครึ่งนะ", Theme.muted)
-                Image(systemName: "arrow.right").foregroundStyle(Theme.accent).padding(.top, 30).drift(x: 4, duration: 0.9)
-                example("IT TYPES", "พรุ่งนี้ประชุมตอน 10 โมงครึ่งนะ", Theme.accentText)
-            }
-            .fixedSize(horizontal: false, vertical: true)
-            .reveal(2)
-            Text("Setup takes about a minute.").font(.system(size: 13)).foregroundStyle(Theme.muted).reveal(3)
+        // เรียบ สงบ: โลโก้ + หัวข้อ + ประโยคเดียว จางเข้าทีละชิ้นช้าๆ
+        VStack(spacing: 0) {
+            Spacer(minLength: 0)
+            Image(nsImage: NSApplication.shared.applicationIconImage).resizable().frame(width: 104, height: 104)
+                .softIn(0)
+            Text("Welcome to WhisperFirst").font(Theme.rounded(32, .bold)).tracking(-0.4).foregroundStyle(Theme.ink)
+                .padding(.top, 22).softIn(1)
+            Text("Hold \(m.pushToTalkText), say what you want to write, let go.\nClean text appears wherever you're typing.")
+                .font(.system(size: 15)).foregroundStyle(Theme.muted).multilineTextAlignment(.center).lineSpacing(4)
+                .padding(.top, 10).softIn(2)
+            Text("Thai, English, or both · Setup takes about a minute")
+                .font(.system(size: 12.5)).foregroundStyle(Theme.faint)
+                .padding(.top, 26).softIn(3)
+            Spacer(minLength: 0)
+            Spacer(minLength: 0)
         }
-    }
-
-    private func howRow(_ icon: String, _ bg: UInt32, _ fg: UInt32, _ title: String, _ detail: String) -> some View {
-        HStack(spacing: 14) {
-            Image(systemName: icon).font(.system(size: 15)).foregroundStyle(Color(hex: fg))
-                .frame(width: 36, height: 36).background(RoundedRectangle(cornerRadius: 11, style: .continuous).fill(Color(hex: bg)))
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.system(size: 14, weight: .semibold))
-                Text(detail).font(.system(size: 12.5)).foregroundStyle(Theme.muted)
-            }
-            Spacer()
-        }
-        .padding(.horizontal, 16).padding(.vertical, 11)
-    }
-
-    private func example(_ label: String, _ text: String, _ color: Color) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(label).font(.system(size: 11, weight: .semibold)).tracking(0.4).foregroundStyle(color)
-            Text(text).font(.system(size: 14)).lineSpacing(3).fixedSize(horizontal: false, vertical: true)
-        }
-        .padding(16).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).wfCard()
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     // MARK: 2 สิทธิ์
@@ -231,16 +204,17 @@ struct OnboardingView: View {
     private var permissions: some View {
         VStack(alignment: .leading, spacing: 18) {
             PageTitle(title: "Two quick permissions", subtitle: "macOS asks once. You can change these later in System Settings → Privacy & Security.")
-                .reveal(0)
+                .zoomIn(0)
             VStack(spacing: 0) {
                 permRow(icon: "mic.fill", title: "Microphone", detail: "To hear you while you hold the key. Nothing is recorded otherwise.",
-                        ok: m.mic, button: m.micDenied ? "Open Settings" : "Allow") { m.requestMic() }
+                        ok: m.mic, button: m.micDenied ? "Open Settings" : "Allow", ripple: true) { m.requestMic() }
+                    .flipIn(1)
                 Rectangle().fill(Theme.hairline).frame(height: 1)
                 permRow(icon: "keyboard", title: "Accessibility", detail: "To notice your shortcut and type the text into other apps.",
                         ok: m.ax, button: "Open Settings") { m.requestAX() }
+                    .flipIn(2)
             }
             .wfCard()
-            .reveal(1)
             if !m.ax {
                 HStack(alignment: .top, spacing: 10) {
                     Image(systemName: "lightbulb").foregroundStyle(Theme.accentText)
@@ -249,15 +223,17 @@ struct OnboardingView: View {
                 }
                 .padding(14).frame(maxWidth: .infinity, alignment: .leading)
                 .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Theme.accentSoft.opacity(0.6)))
-                .reveal(2)
+                .slideIn(.bottom, 4)
             }
         }
     }
 
-    private func permRow(icon: String, title: String, detail: String, ok: Bool, button: String, action: @escaping () -> Void) -> some View {
+    private func permRow(icon: String, title: String, detail: String, ok: Bool, button: String, ripple: Bool = false,
+                         action: @escaping () -> Void) -> some View {
         HStack(spacing: 14) {
             Image(systemName: icon).font(.system(size: 15)).foregroundStyle(Theme.accentText)
                 .frame(width: 38, height: 38).background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Theme.accentSoft))
+                .background(Ripple(active: ripple && !reduce))
             VStack(alignment: .leading, spacing: 3) {
                 Text(title).font(.system(size: 14.5, weight: .semibold))
                 Text(detail).font(.system(size: 12.5)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
@@ -280,10 +256,18 @@ struct OnboardingView: View {
 
     // MARK: 3 API key
 
+    /// หน้านี้เล่นช้ากว่าหน้าอื่น 1.5 เท่า (user อยากให้ค่อยๆ)
+    private static let keyPace = 1.5
+
     private var apiKey: some View {
         VStack(alignment: .leading, spacing: 18) {
-            PageTitle(title: "Connect Google Gemini", subtitle: "WhisperFirst uses Gemini to understand you and tidy the text. A free key is enough for everyday use.")
-                .reveal(0)
+            HStack(alignment: .top, spacing: 14) {
+                Image(systemName: "key.fill").font(.system(size: 20)).foregroundStyle(Theme.accentText)
+                    .frame(width: 46, height: 46).background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Theme.accentSoft))
+                    .swingIn(pace: Self.keyPace).keyTurn(pace: Self.keyPace)
+                PageTitle(title: "Connect Google Gemini", subtitle: "WhisperFirst uses Gemini to understand you and tidy the text. A free key is enough for everyday use.")
+                    .slideIn(.trailing, 0, pace: Self.keyPace)
+            }
             VStack(alignment: .leading, spacing: 14) {
                 HStack(spacing: 10) {
                     Text("1").font(.system(size: 12, weight: .bold)).foregroundStyle(Theme.accentText)
@@ -312,10 +296,10 @@ struct OnboardingView: View {
                 .padding(.leading, 32)
             }
             .padding(20).wfCard()
-            .reveal(1)
+            .blurIn(1, radius: 22, pace: Self.keyPace)
             Text("Your key stays on this Mac (readable only by you). Change it anytime in Settings.")
                 .font(.system(size: 12.5)).foregroundStyle(Theme.muted)
-                .reveal(2)
+                .blurIn(2, pace: Self.keyPace)
         }
     }
 
@@ -327,31 +311,32 @@ struct OnboardingView: View {
         let hands = sc.combos(.handsFree), enter = sc.combos(.pressEnter)
         return VStack(alignment: .leading, spacing: 16) {
             PageTitle(title: "Your keys", subtitle: "These are ready to go. Change any of them later on the Shortcuts page.")
-                .reveal(0)
+                .slideIn(.leading, 0, distance: 70)   // หัวข้อมาจากซ้าย · แถวด้านล่างสวนมาจากขวา
             VStack(spacing: 0) {
-                keyRow("Talk", "Hold, speak, let go") { Keycaps(combo: ptt) }.reveal(1)
+                keyRow(order: 1, "Talk", "Hold, speak, let go") { Keycaps(combo: ptt) }
                 divider
-                keyRow("Hands-free", "Press to start, press again to finish — for longer thoughts") {
+                keyRow(order: 2, "Hands-free", "Press to start, press again to finish — for longer thoughts") {
                     HStack(spacing: 4) {
                         Keycap(text: "2×"); Keycaps(combo: ptt)
                         ForEach(Array(hands.enumerated()), id: \.offset) { _, c in or; Keycaps(combo: c) }
                     }
-                }.reveal(2)
+                }
                 if !enter.isEmpty {
                     divider
-                    keyRow("Press Enter", "Send the message without reaching for the keyboard") {
+                    keyRow(order: 3, "Press Enter", "Send the message without reaching for the keyboard") {
                         HStack(spacing: 4) { ForEach(Array(enter.enumerated()), id: \.offset) { i, c in if i > 0 { or }; Keycaps(combo: c) } }
-                    }.reveal(3)
+                    }
                 }
                 divider
-                keyRow("Edit selected text", "Press ⇧ while talking, then say “translate to English”") { Keycap(text: "⇧") }.reveal(4)
+                keyRow(order: 4, "Edit selected text", "Press ⇧ while talking, then say “translate to English”") { Keycap(text: "⇧") }
                 divider
-                keyRow("Cancel", "While talking or waiting") { Keycap(text: "Esc") }.reveal(5)
+                keyRow(order: 5, "Cancel", "While talking or waiting") { Keycap(text: "Esc") }
                 divider
-                keyRow("Paste again", "Your most recent text") { Keycaps(combo: sc.combos(.pasteLast).first) }.reveal(6)
+                keyRow(order: 6, "Paste again", "Your most recent text") { Keycaps(combo: sc.combos(.pasteLast).first) }
                 divider
-                keyRow("Teach a word", "Select a name or word in any app, then press") { Keycaps(combo: sc.combos(.addWord).first) }.reveal(7)
+                keyRow(order: 7, "Teach a word", "Select a name or word in any app, then press") { Keycaps(combo: sc.combos(.addWord).first) }
             }
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))   // แถวที่เลื่อนเข้ามาไม่ล้นนอกการ์ด
             .wfCard()
             if hands.contains(where: { $0.contains { $0.hasPrefix("m:") } }) || enter.contains(where: { $0.contains { $0.hasPrefix("m:") } }) {
                 HStack(alignment: .top, spacing: 10) {
@@ -360,7 +345,7 @@ struct OnboardingView: View {
                         .font(.system(size: 12.5)).foregroundStyle(Theme.inkSecondary).fixedSize(horizontal: false, vertical: true)
                 }
                 .padding(.horizontal, 4)
-                .reveal(8)
+                .blurIn(5)
             }
         }
     }
@@ -368,63 +353,50 @@ struct OnboardingView: View {
     private var divider: some View { Rectangle().fill(Theme.hairline).frame(height: 1) }
     private var or: some View { Text("or").font(.system(size: 11.5)).foregroundStyle(Theme.faint).padding(.horizontal, 2) }
 
-    private func keyRow<K: View>(_ title: String, _ detail: String, @ViewBuilder _ k: () -> K) -> some View {
+    private func keyRow<K: View>(order: Int, _ title: String, _ detail: String, @ViewBuilder _ k: () -> K) -> some View {
         HStack(spacing: 14) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).font(.system(size: 13.5, weight: .semibold))
                 Text(detail).font(.system(size: 12)).foregroundStyle(Theme.muted)
             }
             Spacer(minLength: 8)
-            k()
+            k().pressWave(order)   // ปุ่มยุบไล่ทีละแถว เหมือนมีคนกดให้ดู
         }
         .padding(.horizontal, 18).padding(.vertical, 9)
+        .slideIn(.trailing, order, distance: 140)
     }
 
     // MARK: 5 ลองพูด
 
     private var tryIt: some View {
+        // เรียบง่าย: คำแนะนำบรรทัดเดียว + กล่องข้อความ + สถานะตัวหนังสือ
         let ok = m.tried || !m.practice.isEmpty
-        let waiting = !ok && (overlay.phase == .idle || overlay.phase == .hover)
-        return VStack(alignment: .leading, spacing: 18) {
-            PageTitle(title: "Give it a try", subtitle: "Click in the box, hold \(m.pushToTalkText), say something, then let go.")
-                .reveal(0)
-            HStack(spacing: 24) {
-                // ปุ่มใหญ่แบบหน้า Home: ยุบตอนกดค้างพูด · ระหว่างรอมีวงแสงชวนกด
-                BigKeycap(combo: m.pushToTalk, pressed: overlay.phase == .listening && !overlay.handsFree)
-                    .background(PulseRing(active: waiting && !reduce))
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(status).font(Theme.rounded(17, .semibold)).foregroundStyle(Theme.accentText)
-                        .contentTransition(.opacity)
-                        .animation(.easeOut(duration: 0.2), value: overlay.phase)
-                    Text("Try: “สวัสดีครับ วันนี้อากาศดีมาก แล้วก็ฝากส่งอีเมลให้ทีมด้วยนะ”")
-                        .font(.system(size: 12.5)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
-                }
-            }
-            .padding(.leading, 4)
-            .reveal(1)
+        return VStack(alignment: .leading, spacing: 16) {
+            PageTitle(title: "Give it a try", subtitle: "Click in the box, hold \(m.pushToTalkText) and say something, then let go.")
+                .softIn(0)
             TextEditor(text: $m.practice)
-                .font(.system(size: 15)).scrollContentBackground(.hidden)
-                .padding(12).frame(height: 130)
-                .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Theme.card))
-                .wfOutline(14, ok ? Theme.successText.opacity(0.5) : Theme.stroke, ok ? 1.5 : 1)
-                .reveal(2)
-            ZStack(alignment: .topLeading) {
+                .font(.system(size: 16)).lineSpacing(4).scrollContentBackground(.hidden)
+                .padding(14).frame(height: 210)
+                .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Theme.card))
+                .wfOutline(16, ok ? Theme.successText.opacity(0.45) : Theme.stroke, 1)
+                .animation(.easeOut(duration: 0.3), value: ok)
+                .softIn(1)
+            HStack(spacing: 8) {
                 if ok {
-                    HStack(spacing: 9) {
-                        Image(systemName: "checkmark.circle.fill")
-                        Text("That's it — it works the same in every app.").font(.system(size: 13, weight: .medium))
-                        Spacer()
-                    }
-                    .foregroundStyle(Theme.successBanner)
-                    .padding(.horizontal, 16).padding(.vertical, 11)
-                    .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Theme.successBg))
-                    .transition(reduce ? .opacity : .move(edge: .bottom).combined(with: .opacity))
+                    Image(systemName: "checkmark.circle.fill").foregroundStyle(Theme.successText)
+                    Text("That's it — it works the same in every app.").foregroundStyle(Theme.successBanner)
                 } else if !m.ax || !m.mic || !m.keySaved {
                     Text(!m.ax || !m.mic ? "Permissions aren't on yet — go Back to allow them." : "No Gemini key yet — go Back to add one.")
-                        .font(.system(size: 12.5)).foregroundStyle(Theme.warnText)
+                        .foregroundStyle(Theme.warnText)
+                } else {
+                    Text(status).foregroundStyle(overlay.phase == .idle || overlay.phase == .hover ? Theme.muted : Theme.accentText)
                 }
             }
-            .animation(.spring(response: 0.4, dampingFraction: 0.75), value: ok)
+            .font(.system(size: 13, weight: .medium))
+            .animation(.easeOut(duration: 0.25), value: overlay.phase)
+            .animation(.easeOut(duration: 0.25), value: ok)
+            .padding(.leading, 2)
+            .softIn(2)
         }
     }
 
@@ -434,7 +406,7 @@ struct OnboardingView: View {
         case .thinking: "Polishing…"
         case .done: "Done!"
         case .error: "Something went wrong — try again"
-        default: "Hold to talk"
+        default: "Try: “สวัสดีครับ วันนี้อากาศดีมาก”"
         }
     }
 
@@ -443,9 +415,9 @@ struct OnboardingView: View {
     private var done: some View {
         VStack(alignment: .leading, spacing: 18) {
             HStack(spacing: 16) {
-                SuccessSeal(animated: !reduce)
+                SuccessSeal(animated: !reduce).background(Confetti(active: !reduce))
                 PageTitle(title: "You're all set 🎉", subtitle: "WhisperFirst lives in your menu bar and works in every app.")
-                    .reveal(0)
+                    .popScale(1)
             }
             VStack(spacing: 0) {
                 tipRow("menubar.rectangle", "Look for the W in the menu bar", "Paste again, retry the last recording, settings — all there")
@@ -455,7 +427,7 @@ struct OnboardingView: View {
                 tipRow("character.book.closed", "Teach it your words", "Names and jargon in the Dictionary get spelled right")
             }
             .wfCard()
-            .reveal(1)
+            .reveal(3)
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Open WhisperFirst when I log in").font(.system(size: 13.5, weight: .semibold))
@@ -465,8 +437,8 @@ struct OnboardingView: View {
                 Toggle("", isOn: Binding(get: { m.loginItem }, set: { m.setLoginItem($0) })).toggleStyle(.switch).labelsHidden()
             }
             .padding(.horizontal, 18).padding(.vertical, 14).wfCard()
-            .reveal(2)
-            Text("You can open this guide again from Help.").font(.system(size: 12.5)).foregroundStyle(Theme.muted).reveal(3)
+            .reveal(4)
+            Text("You can open this guide again from Help.").font(.system(size: 12.5)).foregroundStyle(Theme.muted).reveal(5)
         }
     }
 
@@ -517,55 +489,111 @@ private struct Reveal: ViewModifier {
     }
 }
 
-/// เด้งเข้า (ย่อ → ขยายเกินนิด → พอดี)
-private struct PopIn: ViewModifier {
+/// โผล่ครั้งเดียวตอนแสดง: สถานะก่อน → หลัง ด้วยแอนิเมชันที่กำหนด (ฐานของโมชั่นเข้าทุกแบบ)
+private struct Entrance<Effect: ViewModifier>: ViewModifier {
+    let animation: Animation
+    let effect: (Bool) -> Effect
     @StateObject private var shown = MotionFlag()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.wfStill) private var still
-    private var reduce: Bool { reduceMotion || still }
     func body(content: Content) -> some View {
-        let on = shown.on || reduce
-        content.scaleEffect(on ? 1 : 0.6).opacity(on ? 1 : 0)
+        let reduce = reduceMotion || still
+        content.modifier(effect(shown.on || reduce))
+            .onAppear { if !reduce { withAnimation(animation) { shown.on = true } } }
+    }
+}
+
+private struct Shift: ViewModifier {
+    let x: CGFloat, y: CGFloat, opacity: Double, blur: CGFloat, scale: CGFloat, angle: Double, flip: Double
+    func body(content: Content) -> some View {
+        content
+            .rotation3DEffect(.degrees(flip), axis: (x: 1, y: 0, z: 0), anchor: .top, perspective: 0.6)
+            .rotationEffect(.degrees(angle)).scaleEffect(scale).blur(radius: blur)
+            .offset(x: x, y: y).opacity(opacity)
+    }
+    static func at(_ on: Bool, x: CGFloat = 0, y: CGFloat = 0, blur: CGFloat = 0, scale: CGFloat = 1, angle: Double = 0, flip: Double = 0) -> Shift {
+        on ? Shift(x: 0, y: 0, opacity: 1, blur: 0, scale: 1, angle: 0, flip: 0)
+           : Shift(x: x, y: y, opacity: 0, blur: blur, scale: scale, angle: angle, flip: flip)
+    }
+}
+
+/// บิดไป-กลับครั้งเดียว (ไขกุญแจ)
+private struct KeyTurn: ViewModifier {
+    let pace: Double
+    @StateObject private var turned = MotionFlag()
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.wfStill) private var still
+    func body(content: Content) -> some View {
+        content.rotation3DEffect(.degrees(turned.on ? 55 : 0), axis: (x: 1, y: 0, z: 0))
             .onAppear {
-                guard !reduce else { return }
-                withAnimation(.spring(response: 0.5, dampingFraction: 0.55).delay(0.05)) { shown.on = true }
+                guard !(reduceMotion || still) else { return }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.1 * pace) {
+                    withAnimation(.easeInOut(duration: 0.22 * pace)) { turned.on = true }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.26 * pace) {
+                        withAnimation(.spring(response: 0.4 * pace, dampingFraction: 0.5)) { turned.on = false }
+                    }
+                }
             }
     }
 }
 
-/// ลอยไปมาเบาๆ ไม่รู้จบ
-private struct Drift: ViewModifier {
-    let x: CGFloat, y: CGFloat, duration: Double
-    @StateObject private var moved = MotionFlag()
+/// ปุ่มยุบลงครั้งเดียวตามลำดับ (คลื่นกดไล่แถว)
+private struct PressWave: ViewModifier {
+    let order: Int
+    @StateObject private var down = MotionFlag()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.wfStill) private var still
-    private var reduce: Bool { reduceMotion || still }
     func body(content: Content) -> some View {
-        content.offset(x: moved.on ? x : 0, y: moved.on ? y : 0)
+        content.offset(y: down.on ? 4 : 0).scaleEffect(down.on ? 0.86 : 1)
+            .shadow(color: Theme.accent.opacity(down.on ? 0.55 : 0), radius: 8)
             .onAppear {
-                guard !reduce else { return }
-                withAnimation(.easeInOut(duration: duration).repeatForever(autoreverses: true).delay(0.6)) { moved.on = true }
+                guard !(reduceMotion || still) else { return }
+                let t = 0.9 + Double(order) * 0.14
+                DispatchQueue.main.asyncAfter(deadline: .now() + t) {
+                    withAnimation(.easeOut(duration: 0.07)) { down.on = true }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.16) {
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.4)) { down.on = false }
+                    }
+                }
             }
     }
 }
 
 extension View {
     fileprivate func reveal(_ order: Int) -> some View { modifier(Reveal(order: order)) }
-    fileprivate func popIn() -> some View { modifier(PopIn()) }
-    fileprivate func drift(x: CGFloat = 0, y: CGFloat = 0, duration: Double) -> some View { modifier(Drift(x: x, y: y, duration: duration)) }
-}
-
-/// วงแสงส้มกระจายออกรอบปุ่ม — ชวนให้กด
-private struct PulseRing: View {
-    let active: Bool
-    @StateObject private var go = MotionFlag()
-    var body: some View {
-        RoundedRectangle(cornerRadius: 24, style: .continuous)
-            .stroke(Theme.accent, lineWidth: 2)
-            .scaleEffect(go.on ? 1.18 : 1)
-            .opacity(active ? (go.on ? 0 : 0.55) : 0)
-            .onAppear { withAnimation(.easeOut(duration: 1.6).repeatForever(autoreverses: false)) { go.on = true } }
+    /// เลื่อนเข้าจากขอบที่กำหนด
+    fileprivate func slideIn(_ edge: Edge, _ order: Int, distance d: CGFloat = 44, pace: Double = 1) -> some View {
+        modifier(Entrance(animation: .spring(response: 0.62 * pace, dampingFraction: 0.78).delay((0.05 + Double(order) * 0.09) * pace)) {
+            Shift.at($0, x: edge == .leading ? -d : edge == .trailing ? d : 0, y: edge == .top ? -d : edge == .bottom ? d / 2 : 0)
+        })
     }
+    /// เบลอแล้วค่อยชัด
+    fileprivate func blurIn(_ order: Int, radius: CGFloat = 12, pace: Double = 1) -> some View {
+        modifier(Entrance(animation: .easeOut(duration: (radius > 12 ? 1.0 : 0.6) * pace).delay(Double(order) * 0.15 * pace)) { Shift.at($0, blur: radius, scale: 1.04) })
+    }
+    /// ซูมเข้าจากขนาดใหญ่ (เหมือนกล้องถอยออก)
+    fileprivate func zoomIn(_ order: Int) -> some View {
+        modifier(Entrance(animation: .spring(response: 0.75, dampingFraction: 0.82).delay(Double(order) * 0.1)) { Shift.at($0, blur: 4, scale: 1.25) })
+    }
+    /// เด้งขยายจากเล็ก (ฉลองจบ)
+    fileprivate func popScale(_ order: Int) -> some View {
+        modifier(Entrance(animation: .spring(response: 0.55, dampingFraction: 0.5).delay(0.2 + Double(order) * 0.1)) { Shift.at($0, scale: 0.6) })
+    }
+    /// บิดเหมือนไขกุญแจ หลังแกว่งเข้ามาเสร็จ
+    fileprivate func keyTurn(pace: Double = 1) -> some View { modifier(KeyTurn(pace: pace)) }
+    /// พลิกลงมาแบบ 3D (บานพับด้านบน)
+    fileprivate func flipIn(_ order: Int) -> some View {
+        modifier(Entrance(animation: .spring(response: 0.95, dampingFraction: 0.62).delay(0.15 + Double(order) * 0.3)) { Shift.at($0, flip: -100) })
+    }
+    /// จางเข้านุ่มๆ ช้าๆ (ขยับขึ้นนิดเดียว) — หน้าที่ต้องการความสงบ
+    fileprivate func softIn(_ order: Int) -> some View {
+        modifier(Entrance(animation: .easeOut(duration: 0.9).delay(0.1 + Double(order) * 0.18)) { Shift.at($0, y: 6, scale: 0.99) })
+    }
+    /// แกว่งเข้ามาเหมือนห้อยอยู่
+    fileprivate func swingIn(pace: Double = 1) -> some View {
+        modifier(Entrance(animation: .spring(response: 0.9 * pace, dampingFraction: 0.32).delay(0.1 * pace)) { Shift.at($0, y: -30, scale: 0.4, angle: -110) })
+    }
+    fileprivate func pressWave(_ order: Int) -> some View { modifier(PressWave(order: order)) }
 }
 
 /// เครื่องหมายถูกสีเขียว เด้งเข้า + วงกระจายออกครั้งเดียว
@@ -587,5 +615,55 @@ private struct SuccessSeal: View {
         .scaleEffect(on ? 1 : 0.5).opacity(on ? 1 : 0)
         .animation(.spring(response: 0.5, dampingFraction: 0.6), value: shown.on)
         .onAppear { if animated { shown.on = true } }
+    }
+}
+
+/// คลื่นวงกลมกระจายออกจากไอคอนเป็นจังหวะ (ไมค์กำลังฟัง)
+private struct Ripple: View {
+    let active: Bool
+    var body: some View {
+        ZStack { ForEach(0..<2, id: \.self) { RippleRing(active: active, delay: Double($0) * 0.9) } }
+    }
+}
+
+private struct RippleRing: View {
+    let active: Bool
+    let delay: Double
+    @StateObject private var go = MotionFlag()
+    var body: some View {
+        RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .stroke(Theme.accent.opacity(0.75), lineWidth: 2)
+            .scaleEffect(go.on ? 2.1 : 1).opacity(active ? (go.on ? 0 : 0.85) : 0)
+            .onAppear {
+                guard active else { return }
+                withAnimation(.easeOut(duration: 1.8).repeatForever(autoreverses: false).delay(delay)) { go.on = true }
+            }
+    }
+}
+
+/// คอนเฟตติกระจายจากเครื่องหมายถูกครั้งเดียว (ตำแหน่ง/สีคงที่ตามลำดับ ไม่สุ่มทุก render)
+private struct Confetti: View {
+    let active: Bool
+    @StateObject private var burst = MotionFlag()
+    private static let colors: [UInt32] = [0xD9732F, 0x2E8B4E, 0x6A55C8, 0xD9475A, 0xE0A526, 0x2F7FF0]
+    var body: some View {
+        ZStack {
+            ForEach(0..<40, id: \.self) { i in
+                let angle = Double(i) / 40 * 2 * .pi + Double(i % 3) * 0.17
+                let dist = 80 + Double((i * 37) % 95)
+                RoundedRectangle(cornerRadius: 1.5)
+                    .fill(Color(hex: Self.colors[i % Self.colors.count]))
+                    .frame(width: i % 2 == 0 ? 7 : 5, height: i % 2 == 0 ? 3.5 : 5)
+                    .rotationEffect(.degrees(burst.on ? Double(180 + i * 47) : 0))
+                    .scaleEffect(burst.on ? 1 : 0.1)   // เริ่มเป็นจุดเล็กซ่อนหลังเครื่องหมายถูก
+                    .offset(x: burst.on ? cos(angle) * dist : 0, y: burst.on ? sin(angle) * dist + 70 : 0)   // +70 = ร่วงลงตามแรงโน้มถ่วง
+                    .opacity(burst.on ? 0 : (active ? 1 : 0))
+            }
+        }
+        .allowsHitTesting(false)
+        .onAppear {
+            guard active else { return }
+            withAnimation(.timingCurve(0.15, 0.7, 0.4, 1, duration: 1.7).delay(0.25)) { burst.on = true }
+        }
     }
 }

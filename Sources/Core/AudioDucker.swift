@@ -28,6 +28,8 @@ final class AudioDucker {
     private var launchWatch: NSObjectProtocol?
     /// กำลังฟังว่าเพลงเล่นอยู่จริงไหม (ยังไม่ได้กด play/pause) · ปล่อยปุ่มระหว่างนี้ = ไม่ต้องกด
     private var probing = false
+    /// เลขรอบการฟัง — ผลที่มาช้าจากรอบก่อน (กดพูดรัวๆ) ต้องไม่ถูกใช้กับรอบใหม่
+    private var probeToken = 0
 
     init() { recoverAfterCrash() }
 
@@ -57,6 +59,7 @@ final class AudioDucker {
 
     func restore() {
         probing = false
+        probeToken += 1
         resumeMedia()
         guard let s = saved else { return }
         saved = nil
@@ -112,14 +115,22 @@ final class AudioDucker {
         guard !media.isEmpty else { return }   // ไม่มีเพลง/วิดีโอเล่นอยู่ → ไม่กดอะไร (กันไปสั่งเล่นเพลงขึ้นมาเอง)
         // เบราว์เซอร์เปิดช่องเสียงค้างไว้แม้หยุดวิดีโอแล้ว → ฟังเสียงจริงก่อน เงียบ = หยุดอยู่แล้ว ห้ามกด (ไม่งั้นกลายเป็นสั่งเล่น)
         probing = true
-        PlaybackProbe.peak(of: media.flatMap { procs[$0] ?? [] }) { [weak self] peak in
-            guard let self, self.probing else { return }   // ปล่อยปุ่มไปแล้วระหว่างฟัง
+        probeToken += 1
+        let token = probeToken
+        PlaybackProbe.check(media.flatMap { procs[$0] ?? [] }) { [weak self] result in
+            guard let self, self.probing, self.probeToken == token else { return }   // ปล่อยปุ่ม/เริ่มรอบใหม่ไปแล้วระหว่างฟัง
             self.probing = false
-            if let peak, peak < PlaybackProbe.silence {
+            switch result {
+            case .audible(let peak):
+                self.sendPause(media: media, before: before, peak: peak)
+            case .silent(let peak):
                 Log.write("audio: \(media.sorted()) เงียบอยู่ (peak \(String(format: "%.5f", peak))) → ไม่กด play/pause")
-                return
+            case .unknown(let why):
+                // ไม่รู้ว่าเล่นอยู่ไหม → ไม่กด: ปล่อยเพลงเล่นต่อ ดีกว่าไปสั่งเล่นวิดีโอที่หยุดไว้
+                Log.write("audio: วัดเสียงไม่ได้ (\(why)) → ไม่กด play/pause")
+            case .unsupported:
+                self.sendPause(media: media, before: before, peak: nil)   // macOS < 14.2 ไม่มี tap → ใช้วิธีเดิม
             }
-            self.sendPause(media: media, before: before, peak: peak)
         }
     }
 
@@ -323,68 +334,93 @@ final class AudioDucker {
 /// ฟังเสียงจริงที่แอปหนึ่งๆ ส่งออก (Core Audio process tap, macOS 14.2+) — บอกได้ว่าเพลง "กำลังเล่น" หรือแค่ "เปิดช่องเสียงค้างไว้"
 /// ไม่บันทึกอะไร: เก็บแค่ค่าเสียงดังสุดใน ~0.15 วิ · ครั้งแรก macOS ขอสิทธิ์ "System Audio Recording"
 enum PlaybackProbe {
+    enum Result { case audible(Float), silent(Float), unknown(String), unsupported }
+
     /// ต่ำกว่านี้ = เงียบ (~ -66 dB) — วิดีโอที่หยุดอยู่ส่งศูนย์ล้วน
     static let silence: Float = 0.0005
 
-    /// nil = วัดไม่ได้ (OS เก่า / สร้าง tap ไม่ได้) → ผู้เรียกใช้วิธีเดิม · คืนผลบน main
-    static func peak(of procs: [AudioObjectID], seconds: Double = 0.15, _ done: @escaping @MainActor (Float?) -> Void) {
-        guard !procs.isEmpty else { DispatchQueue.main.async { done(nil) }; return }
+    /// ฟังเสียงที่ process เหล่านี้ส่งออก ~0.15 วิ · คืนผลบน main
+    static func check(_ procs: [AudioObjectID], _ done: @escaping @MainActor (Result) -> Void) {
+        guard !procs.isEmpty else { DispatchQueue.main.async { MainActor.assumeIsolated { done(.unknown("ไม่มี process")) } }; return }
         DispatchQueue.global(qos: .userInitiated).async {
-            var r: Float? = nil
-            if #available(macOS 14.2, *) { r = measure(procs, seconds: seconds) }
+            var r = Result.unsupported
+            if #available(macOS 14.2, *) {
+                let d = CATapDescription(stereoMixdownOfProcesses: procs)
+                switch measure(d, seconds: 0.15) {
+                case .success(let peak): r = peak < silence ? .silent(peak) : .audible(peak)
+                case .failure(let e): r = .unknown(e.why)
+                }
+            }
             DispatchQueue.main.async { MainActor.assumeIsolated { done(r) } }
         }
     }
 
-    /// ขอสิทธิ์ล่วงหน้าตอนว่าง (ไม่ให้ dialog เด้งกลางประโยคครั้งแรก) — สร้าง tap ทั้งระบบแล้วทิ้ง
+    /// ขอสิทธิ์ล่วงหน้าตอนว่าง (ไม่ให้ dialog เด้งกลางประโยค) — dialog ขึ้นตอนเริ่มฟังจริง เลยต้องเปิดฟังทั้งระบบสั้นๆ
     static func requestPermission() {
         guard #available(macOS 14.2, *) else { return }
         DispatchQueue.global(qos: .utility).async {
-            let d = CATapDescription(stereoGlobalTapButExcludeProcesses: [])
-            d.isPrivate = true
-            var tap = AudioObjectID(kAudioObjectUnknown)
-            if AudioHardwareCreateProcessTap(d, &tap) == noErr { AudioHardwareDestroyProcessTap(tap) }
+            _ = measure(CATapDescription(stereoGlobalTapButExcludeProcesses: []), seconds: 0.05)
         }
     }
 
+    struct Failure: Error { let why: String }
+
+    /// tap อย่างเดียวก่อน — ไม่ยุ่งกับลำโพงเลย (กันเสียงเพลงสะดุด) · ไม่ได้เสียง → ผูกกับลำโพงเป็นนาฬิกาแบบเดิม
     @available(macOS 14.2, *)
-    private static func measure(_ procs: [AudioObjectID], seconds: Double) -> Float? {
+    private static func measure(_ desc: CATapDescription, seconds: Double) -> Swift.Result<Float, Failure> {
+        if tapOnlyWorks != false {
+            let r = measure(desc, seconds: seconds, withOutput: false)
+            if case .success = r { tapOnlyWorks = true; return r }
+            if tapOnlyWorks == nil { tapOnlyWorks = false; Log.write("probe: ฟังแบบ tap อย่างเดียวไม่ได้ → ผูกกับลำโพง") }
+            else { return r }   // เคยใช้ได้ = ครั้งนี้ไม่ได้เพราะเหตุอื่น ไม่ต้องลองซ้ำ
+        }
+        return measure(desc, seconds: seconds, withOutput: true)
+    }
+
+    /// nil = ยังไม่รู้ (ลองครั้งแรก) — แตะจาก thread ของ probe ทีละครั้ง
+    nonisolated(unsafe) private static var tapOnlyWorks: Bool?
+
+    @available(macOS 14.2, *)
+    private static func measure(_ desc: CATapDescription, seconds: Double, withOutput: Bool) -> Swift.Result<Float, Failure> {
         let t0 = Date()
-        let desc = CATapDescription(stereoMixdownOfProcesses: procs)
         desc.isPrivate = true
         desc.muteBehavior = .unmuted
         var tap = AudioObjectID(kAudioObjectUnknown)
-        guard AudioHardwareCreateProcessTap(desc, &tap) == noErr else { Log.write("probe: สร้าง tap ไม่ได้"); return nil }
+        guard AudioHardwareCreateProcessTap(desc, &tap) == noErr else { return .failure(Failure(why: "สร้าง tap ไม่ได้")) }
         defer { AudioHardwareDestroyProcessTap(tap) }
 
         var fa = AudioObjectPropertyAddress(mSelector: kAudioTapPropertyFormat, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
         var asbd = AudioStreamBasicDescription(); var sz = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
         guard AudioObjectGetPropertyData(tap, &fa, 0, nil, &sz, &asbd) == noErr,
-              asbd.mFormatFlags & kAudioFormatFlagIsFloat != 0, asbd.mBitsPerChannel == 32 else { Log.write("probe: รูปแบบเสียงไม่รองรับ"); return nil }
+              asbd.mFormatFlags & kAudioFormatFlagIsFloat != 0, asbd.mBitsPerChannel == 32 else { return .failure(Failure(why: "รูปแบบเสียงไม่รองรับ")) }
 
         var da = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyDefaultSystemOutputDevice, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
         var out = AudioObjectID(0); sz = UInt32(MemoryLayout<AudioObjectID>.size)
         AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &da, 0, nil, &sz, &out)
         var ua = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyDeviceUID, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
         var cf: Unmanaged<CFString>?; sz = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
-        guard AudioObjectGetPropertyData(out, &ua, 0, nil, &sz, &cf) == noErr, let outUID = cf?.takeRetainedValue() as String? else { return nil }
+        guard AudioObjectGetPropertyData(out, &ua, 0, nil, &sz, &cf) == noErr, let outUID = cf?.takeRetainedValue() as String? else {
+            return .failure(Failure(why: "ไม่พบลำโพง"))
+        }
 
-        let agg: [String: Any] = [
+        var agg: [String: Any] = [
             kAudioAggregateDeviceNameKey: "WhisperFirst playback probe",
             kAudioAggregateDeviceUIDKey: "wf-probe-" + UUID().uuidString,
-            kAudioAggregateDeviceMainSubDeviceKey: outUID,
             kAudioAggregateDeviceIsPrivateKey: true,
             kAudioAggregateDeviceIsStackedKey: false,
             kAudioAggregateDeviceTapAutoStartKey: true,
-            kAudioAggregateDeviceSubDeviceListKey: [[kAudioSubDeviceUIDKey: outUID]],
             kAudioAggregateDeviceTapListKey: [[kAudioSubTapDriftCompensationKey: true, kAudioSubTapUIDKey: desc.uuid.uuidString]],
         ]
+        if withOutput {
+            agg[kAudioAggregateDeviceMainSubDeviceKey] = outUID
+            agg[kAudioAggregateDeviceSubDeviceListKey] = [[kAudioSubDeviceUIDKey: outUID]]
+        }
         var dev = AudioObjectID(kAudioObjectUnknown)
-        guard AudioHardwareCreateAggregateDevice(agg as CFDictionary, &dev) == noErr else { Log.write("probe: สร้างอุปกรณ์ฟังไม่ได้"); return nil }
+        guard AudioHardwareCreateAggregateDevice(agg as CFDictionary, &dev) == noErr else { return .failure(Failure(why: "สร้างอุปกรณ์ฟังไม่ได้")) }
         defer { AudioHardwareDestroyAggregateDevice(dev) }
 
         let q = DispatchQueue(label: "wf.probe")
-        var peak: Float = 0, frames = 0
+        var peak: Float = 0, samples = 0
         var proc: AudioDeviceIOProcID?
         guard AudioDeviceCreateIOProcIDWithBlock(&proc, dev, q, { _, input, _, _, _ in
             for b in UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: input)) {
@@ -392,15 +428,18 @@ enum PlaybackProbe {
                 let n = Int(b.mDataByteSize) / 4
                 let f = d.bindMemory(to: Float32.self, capacity: n)
                 for i in 0..<n { let v = abs(f[i]); if v > peak { peak = v } }
-                frames += n
+                samples += n
             }
-        }) == noErr, let proc else { return nil }
+        }) == noErr, let proc else { return .failure(Failure(why: "เปิดตัวฟังไม่ได้")) }
         defer { AudioDeviceDestroyIOProcID(dev, proc) }
-        guard AudioDeviceStart(dev, proc) == noErr else { return nil }
-        Thread.sleep(forTimeInterval: seconds)
+        guard AudioDeviceStart(dev, proc) == noErr else { return .failure(Failure(why: "เริ่มฟังไม่ได้")) }
+        // อุปกรณ์เพิ่งสร้างใช้เวลาสักพักกว่าเสียงแรกจะมา → นับเวลาจากจำนวนเสียงที่ได้จริง (ไม่ใช่เวลานาฬิกา) รอไม่เกิน 0.6 วิ
+        let want = Int(max(asbd.mSampleRate, 8000) * Double(max(asbd.mChannelsPerFrame, 1)) * seconds)
+        let deadline = Date().addingTimeInterval(0.6)
+        while Date() < deadline, q.sync(execute: { samples }) < want { Thread.sleep(forTimeInterval: 0.02) }
         AudioDeviceStop(dev, proc)
-        let (p, n) = q.sync { (peak, frames) }
-        Log.write("probe: peak \(String(format: "%.5f", p)) · \(n) samples · \(Int(Date().timeIntervalSince(t0) * 1000))ms")
-        return n > 0 ? p : nil   // ไม่ได้ข้อมูลเลย = วัดไม่ได้ (ไม่ใช่เงียบ)
+        let (p, n) = q.sync { (peak, samples) }
+        Log.write("probe: peak \(String(format: "%.5f", p)) · \(n)/\(want) samples · \(Int(Date().timeIntervalSince(t0) * 1000))ms\(withOutput ? " · ผูกลำโพง" : " · tap อย่างเดียว")")
+        return n * 2 >= want ? .success(p) : .failure(Failure(why: "ได้เสียง \(n)/\(want)"))   // ได้ไม่ถึงครึ่ง = ตัดสินไม่ได้
     }
 }

@@ -17,6 +17,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     private var wasTrusted = false
 
     func applicationDidFinishLaunching(_ n: Notification) {
+        Paths.seedFromBundle()
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         let menu = NSMenu()
         menu.delegate = self
@@ -208,7 +209,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         guide = nil
         guideWindow = nil
         let first = !Store.config.onboarded
-        if first { Store.update { $0.onboarded = true } }
+        if first {
+            Store.update { $0.onboarded = true }
+            // ข้ามไกด์ตั้งแต่ต้น → ยังไม่มีใครขอสิทธิ์ → ขอตอนนี้ (แบบเดิมตอนเปิดแอป)
+            if AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined {
+                AVCaptureDevice.requestAccess(for: .audio) { ok in if !ok { Log.write("ไม่ได้สิทธิ์ไมค์") } }
+            }
+            if !AX.trusted { AX.prompt() }
+        }
         hub?.settings.geminiKey = Keys.gemini ?? ""
         // ครั้งแรก → พาเข้าหน้าหลักต่อ (ยังไม่มี key → หน้า Settings) · เปิดซ้ำทีหลัง → กลับไปอยู่ menu bar
         if first { DispatchQueue.main.async { self.showHub(Keys.gemini == nil ? .settings : .home) } }

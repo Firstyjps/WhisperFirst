@@ -602,7 +602,7 @@ private struct HomePage: View {
 }
 
 /// ปุ่มคีย์บอร์ดใหญ่บน Home — ยุบลงตอนกำลังฟัง
-struct BigKeycap: View {
+private struct BigKeycap: View {
     let combo: KeyCombo?
     let pressed: Bool
 
