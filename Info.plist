@@ -7,10 +7,10 @@
   <key>CFBundleExecutable</key><string>WhisperFirst</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>1.0</string>
+  <key>CFBundleShortVersionString</key><string>1.0.1</string>
   <key>CFBundleVersion</key><string>1</string>
-  <key>LSMinimumSystemVersion</key><string>14.0</string>
+  <key>LSMinimumSystemVersion</key><string>14.2</string>
   <key>LSUIElement</key><true/>
   <key>NSAudioCaptureUsageDescription</key><string>WhisperFirst ฟังแค่ว่าเพลง/วิดีโอกำลังเล่นอยู่จริงไหม (0.15 วิ ไม่บันทึก) ก่อนหยุดให้ระหว่างที่คุณพูด</string>
-  <key>NSMicrophoneUsageDescription</key><string>WhisperFirst ใช้ไมค์เฉพาะตอนที่คุณกดปุ่มค้างเพื่อพิมพ์ด้วยเสียง</string>
+  <key>NSMicrophoneUsageDescription</key><string>WhisperFirst ใช้ไมค์เฉพาะตอนที่คุณกดปุ่มค้างเพื่อพูด หรือตอนเปิดโหมดแฮนด์ฟรี (กดอีกครั้งเพื่อจบ) แล้วส่งเสียงไปแปลงเป็นข้อความ</string>
 </dict></plist>

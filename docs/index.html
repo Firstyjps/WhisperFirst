@@ -1,0 +1,340 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WhisperFirst — พิมพ์ด้วยเสียงภาษาไทยบน Mac</title>
+<meta name="description" content="กดค้าง Option ขวา พูด แล้วปล่อย — ได้ข้อความไทยที่เกลาแล้ว วางลงทุกแอปบน Mac ในราว 2 วินาที ฟรี">
+<meta property="og:type" content="website">
+<meta property="og:title" content="WhisperFirst — ไม่ต้องพิมพ์ พูดออกมาเลย">
+<meta property="og:description" content="พิมพ์ด้วยเสียงภาษาไทยบน Mac ใช้ได้ทุกแอป ไทยปนอังกฤษได้ ตัด เอ่อ อ่า ให้เอง · ฟรี">
+<meta property="og:image" content="https://whisperfirst.kronkasem.com/assets/og.png">
+<meta property="og:url" content="https://whisperfirst.kronkasem.com/">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="theme-color" content="#FBF9F6">
+<link rel="icon" type="image/png" href="assets/icon-64.png">
+<link rel="apple-touch-icon" href="assets/icon-180.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Anuphan:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+
+<div class="mobile-bar" role="status">
+  <span>WhisperFirst ใช้บน Mac — เปิดลิงก์นี้บน Mac เพื่อดาวน์โหลด</span>
+  <button type="button" data-copy>คัดลอกลิงก์</button>
+</div>
+
+<nav aria-label="เมนูหลัก">
+  <a href="#top" class="brand"><img src="assets/AppIcon-1024.png" alt=""><span>WhisperFirst</span></a>
+  <div class="links">
+    <a href="#how" class="opt">วิธีใช้</a>
+    <a href="#styles" class="opt">สไตล์</a>
+    <a href="#features" class="opt">ฟีเจอร์</a>
+    <a href="#install">ติดตั้ง</a>
+    <a href="#faq">คำถาม</a>
+  </div>
+  <a href="#install" class="btn" data-dl>ดาวน์โหลดสำหรับ Mac</a>
+</nav>
+
+<main>
+<div style="position:relative">
+  <header id="top" class="hero">
+    <div class="hero-inner">
+      <div class="eyebrow">พิมพ์ด้วยเสียงภาษาไทย · macOS</div>
+      <h1>ไม่ต้องพิมพ์<br><span>พูดออกมาเลย</span></h1>
+      <p>กดค้าง Option ขวา พูด แล้วปล่อย — ได้ข้อความไทยที่เกลาแล้ว วางลงทุกแอปในราว 2 วินาที</p>
+      <a href="#install" class="btn" data-dl>ดาวน์โหลดฟรี</a>
+      <div class="meta">เวอร์ชัน <span data-ver></span> · macOS 14.2 ขึ้นไป · Mac ชิป M1 ขึ้นไป</div>
+    </div>
+    <div class="ribbon-box" aria-hidden="true">
+      <div class="ribbon" id="ribbon">
+        <svg viewBox="0 0 1440 420">
+          <defs>
+            <path id="wfRaw" d="M -900 330 C -600 330, -220 290, -80 250 C 60 210, 150 60, 290 70 C 420 80, 440 230, 330 240 C 220 250, 230 120, 360 130 C 500 140, 560 330, 690 345"/>
+            <path id="wfClean" d="M 730 345 C 900 345, 1020 300, 1160 230 C 1270 175, 1380 120, 1540 90 C 1800 41, 2100 20, 2400 15"/>
+          </defs>
+          <text fill="#B8AEA2"><textPath id="tpRaw" href="#wfRaw" dominant-baseline="middle"></textPath></text>
+          <use href="#wfClean" fill="none" stroke="#2B2620" stroke-width="38" stroke-linecap="round"/>
+          <text fill="#FBF9F6"><textPath id="tpClean" href="#wfClean" dominant-baseline="middle"></textPath></text>
+          <g transform="translate(712 345)" id="ribbonIsland"><rect x="-54" y="-26" width="108" height="52" rx="26" fill="#000"/></g>
+        </svg>
+      </div>
+    </div>
+  </header>
+
+  <section class="panel dark cover" id="cover">
+    <div class="wrap">
+      <div class="head">
+        <div class="eyebrow">เกลาให้แบบคนไทยเขียน</div>
+        <h2>พูดแบบที่พูด ได้ข้อความแบบที่อยากส่ง</h2>
+        <p class="lead">ประโยคสั้นเกลาจากคำที่ถอดสดๆ ระหว่างพูด ประโยคยาวให้ Gemini ฟังเสียงทั้งประโยคเองแล้วเขียนออกมาในครั้งเดียว — ใช้บริบทตัดสินคำกำกวม</p>
+      </div>
+      <div class="ba">
+        <div class="ba-card ba-said reveal" style="--travel:70px;--tilt:-3deg">
+          <div class="label">สิ่งที่คุณพูด</div>
+          <p><s>เอ่อ</s> พรุ่งนี้ประชุมตอน<s>สิบโมง เอ้ย ไม่ใช่</s> สิบโมงครึ่ง <s>แล้วก็ แบบว่า</s> ฝากเตรียม<s>สไลด์</s> ด้วยนะครับ</p>
+        </div>
+        <div class="ba-card ba-typed reveal" style="--travel:110px;--tilt:3deg">
+          <div class="label">สิ่งที่ถูกพิมพ์</div>
+          <p>พรุ่งนี้ประชุมตอน 10 โมงครึ่ง แล้วก็ฝากเตรียม slide ด้วยนะครับ</p>
+        </div>
+      </div>
+      <div class="pills">
+        <span>ตัด เอ่อ / อ่า / แบบว่า</span><span>พูดผิดแล้วแก้ เก็บแค่ฉบับแก้</span><span>คง ครับ / ค่ะ / นะ</span>
+        <span>Docker ไม่ใช่ “ด็อกเกอร์”</span><span>เว้นวรรคแบบไทย</span><span>ตัวเลข เงิน วันที่ เป็นเลขอารบิก</span><span>ไล่ข้อ → เป็นรายการ</span>
+      </div>
+    </div>
+  </section>
+</div>
+
+<section class="panel speed" id="speed" aria-label="ความเร็ว">
+  <div class="speed-stage" id="speedStage">
+    <div class="speed-head">
+      <h2>พูดจบ ข้อความก็มาถึง</h2>
+      <p>ถอดคำสดๆ ระหว่างที่คุณพูด แล้วแข่งสองโมเดลพร้อมกัน ใครเสร็จก่อนได้วาง</p>
+    </div>
+
+    <div class="sticker" style="--x:-250px;--y:-150px;--dx:-320px;--dy:-120px;--rot:-12deg;--dur:3.2s" aria-hidden="true"><div><div class="st-key"><b>Option</b><small>ฝั่งขวา</small></div></div></div>
+    <div class="sticker" style="--x:250px;--y:-165px;--dx:320px;--dy:-140px;--rot:9deg;--dur:3.8s" aria-hidden="true"><div><div class="st-bubble"><s>เอ่อ…</s><span>ตัดออก</span></div></div></div>
+    <div class="sticker" style="--x:-235px;--y:175px;--dx:-320px;--dy:150px;--rot:7deg;--dur:3.5s" aria-hidden="true"><div><div class="st-ok"><span class="dot-ok">✓</span>วางใน LINE แล้ว</div></div></div>
+    <div class="sticker" style="--x:240px;--y:165px;--dx:320px;--dy:160px;--dur:4.2s" aria-hidden="true"><div>
+      <div class="badge">
+        <svg viewBox="0 0 128 128" width="128" height="128">
+          <circle cx="64" cy="64" r="62" fill="#2B2620"/>
+          <defs><path id="wfCircle" d="M 64,64 m -47,0 a 47,47 0 1,1 94,0 a 47,47 0 1,1 -94,0"/></defs>
+          <text><textPath href="#wfCircle">พูด · เกลา · วาง · พูด · เกลา · วาง · </textPath></text>
+        </svg>
+        <img src="assets/AppIcon-1024.png" alt="">
+      </div>
+    </div></div>
+
+    <div class="speed-card">
+      <div class="speed-content">
+        <div class="mini-island"><div class="bars" data-bars="18" data-h="26"></div></div>
+        <div class="counter"><span id="counter">0.0</span><small>วินาที</small></div>
+        <div class="timeline">
+          <div class="track"><div class="fill"></div><i style="left:0"></i><i style="left:50%;transform:scale(calc(.4 + var(--k2,0) * .6))"></i><i style="left:100%;transform:scale(calc(.4 + var(--k3,0) * .6))"></i></div>
+          <div class="tl-labels"><span>ปล่อยปุ่ม</span><span>เกลา</span><span>วางแล้ว</span></div>
+        </div>
+        <div class="speed-cap">ราวๆ นี้ จากปล่อยปุ่มจนข้อความถูกวาง</div>
+        <div class="stats">
+          <div><b>2 โมเดล</b><span>แข่งกัน ใครเสร็จก่อนได้วาง</span></div>
+          <div><b>~0.1 วิ</b><span>กดแล้วไมค์พร้อมอัด</span></div>
+          <div><b>ทุกแอป</b><span>ช่องไหนพิมพ์ได้ ช่องนั้นพูดได้</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="panel dark how" id="how" aria-label="วิธีใช้">
+  <div class="how-stage" id="howStage">
+    <div class="how-row">
+      <div class="how-steps">
+        <div class="rail"><div></div></div>
+        <div style="display:flex;flex-direction:column;gap:22px">
+          <div class="eyebrow">วิธีใช้</div>
+          <ol id="howSteps"></ol>
+        </div>
+      </div>
+
+      <div class="how-demo" aria-hidden="true">
+        <div class="island" id="island" data-phase="idle">
+          <div class="is-idle"><span></span><span></span><span></span></div>
+          <div class="is-listening">
+            <div class="top"><div class="app-tile">L</div><div class="bars" data-bars="26" data-h="24"></div><div class="timer" id="timer">0:00</div></div>
+            <div class="live"><span id="liveStable"></span> <span class="tail" id="liveTail"></span></div>
+          </div>
+          <div class="is-thinking"><span class="shimmer">กำลังเกลาข้อความ…</span></div>
+          <div class="is-done"><span class="dot-ok">✓</span><span>วางใน LINE แล้ว</span></div>
+        </div>
+        <div class="win">
+          <div class="win-bar"><i></i><i></i><i></i><span>LINE</span></div>
+          <div class="win-body"><small>พี่ต้น · วันนี้ 18:42</small><div class="bubble-in">พรุ่งนี้ประชุมกี่โมงนะ</div></div>
+          <div class="input" id="howInput"><span id="howInputText">พิมพ์ข้อความ…</span><span class="caret"></span></div>
+        </div>
+      </div>
+
+      <div class="how-now" aria-live="polite">
+        <h3 id="howTitle"></h3>
+        <p id="howDesc"></p>
+        <span class="key" id="howKey"></span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="panel light" id="styles" style="z-index:5">
+  <div class="wrap">
+    <div class="styles-top">
+      <div class="head">
+        <div class="eyebrow">ทุกแอป คนละน้ำเสียง</div>
+        <h2>แชทก็แบบแชท อีเมลก็แบบอีเมล</h2>
+        <p class="lead">รู้ว่าข้อความจะไปวางที่แอปไหน แล้วปรับแค่การจัดรูปแบบและเครื่องหมาย — คำที่คุณพูดไม่ถูกเปลี่ยน</p>
+      </div>
+      <div class="seg" id="catTabs" role="group" aria-label="ประเภทแอป"></div>
+    </div>
+    <div class="apps" id="catApps"></div>
+    <div class="style-cards" id="styleCards" role="radiogroup" aria-label="สไตล์การเขียน"></div>
+  </div>
+</section>
+
+<section class="panel dark features" id="features" style="z-index:6">
+  <div class="wrap">
+    <div class="head">
+      <div class="eyebrow">ฉลาดขึ้นทุกครั้งที่ใช้</div>
+      <h2>รู้จักชื่อคน ชื่อโปรเจกต์ และศัพท์ของคุณ</h2>
+    </div>
+    <div class="fgrid">
+      <div class="fcard reveal" style="--travel:90px;--tilt:-4deg">
+        <div><h3>พจนานุกรมที่เรียนรู้เอง</h3><p>แก้คำที่ฟังผิดครั้งเดียว ครั้งหน้าสะกดถูกเอง</p></div>
+        <div class="well dict">
+          <div><span>น็อคน็อค</span><i>→</i><b>NokNok</b></div>
+          <div><span>ดีพซีค</span><i>→</i><b>DeepSeek</b></div>
+          <div class="new"><span>สมชาย</span><i>→</i><b>สมชัย</b><span class="chip-ok">จำคำใหม่</span></div>
+        </div>
+      </div>
+      <div class="fcard reveal" style="--travel:140px;--tilt:3deg;background:var(--soft)">
+        <div><h3>วลีลัด</h3><p style="color:var(--ink2)">พูดคำสั้นๆ ได้อีเมล ลิงก์ ที่อยู่ หรือลายเซ็นเต็มๆ — เนื้อหาไม่ถูกส่งไปที่โมเดล</p></div>
+        <div class="well" style="background:#fff">
+          <div style="font-size:14px;color:var(--muted)">“ส่งไปที่<span style="background:var(--soft);color:var(--softT);border-radius:6px;padding:1px 6px;margin:0 3px">อีเมลงาน</span>นะ”</div>
+          <div style="font-size:15px;font-weight:500">ส่งไปที่ <span style="font-family:var(--mono);font-size:14px">me@work.com</span> นะ</div>
+        </div>
+      </div>
+      <div class="fcard reveal" style="--travel:110px;--tilt:-2deg">
+        <div><h3>โหมดคำสั่ง</h3><p>เลือกข้อความ กด Shift ระหว่างพูด แล้วสั่งได้เลย</p></div>
+        <div class="well" style="background:#F8F5F1">
+          <div style="font-size:14px"><span style="background:var(--soft);border-radius:4px;padding:1px 3px">ขอบคุณมากครับ เดี๋ยวส่งให้พรุ่งนี้</span></div>
+          <div style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted2)"><span style="width:6px;height:6px;border-radius:50%;background:var(--accent)"></span>“แปลเป็นอังกฤษ”</div>
+          <div style="font-size:15px;font-weight:500">Thanks so much — I’ll send it over tomorrow.</div>
+        </div>
+      </div>
+      <div class="fcard reveal" style="--travel:100px;--tilt:4deg;background:var(--sand)">
+        <div><h3>ไมค์เบาก็ยังได้ยินชัด</h3><p>ลดเสียงรบกวน ตัดเสียงสะท้อน และปรับระดับเสียงอัตโนมัติ</p></div>
+        <div class="well" style="background:#fff;gap:12px">
+          <div class="meter"><div><span>เสียงพูด</span><span>0.03 → 0.3</span></div><div class="m"><i style="width:86%;background:var(--accent)"></i></div></div>
+          <div class="meter"><div><span>เสียงรบกวน</span><span>0.012 → 0.004</span></div><div class="m"><i style="width:12%;background:var(--faint)"></i></div></div>
+        </div>
+      </div>
+      <div class="fcard reveal" style="--travel:150px;--tilt:-3deg">
+        <div><h3>เพลงเบาลงเองตอนพูด</h3><p>ลดเสียงหรือหยุดเพลงชั่วคราว แล้วคืนค่าเดิมทันทีที่ปล่อยปุ่ม</p></div>
+        <div class="seg-static"><span>ปล่อยไว้</span><span class="on">เบาลง</span><span>ปิดเสียง</span></div>
+      </div>
+      <div class="fcard reveal" style="--travel:120px;--tilt:2deg;background:var(--accent)">
+        <div><h3>เกาะดำบนขอบจอ</h3><p style="color:var(--ink)">ห้อยจากรอยบาก บอกสถานะ ไม่แย่งโฟกัสจากแอปที่พิมพ์อยู่</p></div>
+        <div style="background:rgba(255,255,255,.22);border-radius:14px;height:96px;position:relative;overflow:hidden">
+          <div style="position:absolute;top:0;left:50%;transform:translateX(-50%);width:230px;max-width:90%;height:38px;background:#000;border-radius:0 0 20px 20px;display:flex;align-items:center;gap:10px;padding:0 14px;color:#fff">
+            <span class="dot-ok" style="width:18px;height:18px;font-size:10px">✓</span>
+            <span style="font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">พรุ่งนี้ประชุม 10 โมงครึ่ง…</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="panel privacy" id="privacy" style="z-index:7">
+  <div class="wrap two">
+    <div>
+      <div class="eyebrow" style="color:var(--accentT)">ความเป็นส่วนตัว</div>
+      <h2>รู้ชัดว่าอะไรออกจากเครื่อง</h2>
+      <p class="lead">ไมค์เปิดตอนกดค้างปุ่ม หรือตอนเปิดแฮนด์ฟรี (กดอีกครั้งเพื่อจบ นานสุด 6 นาที) เท่านั้น · เสียงส่งตรงจาก Mac ไป Google Gemini ด้วย key ของคุณเอง ไม่ผ่านเซิร์ฟเวอร์ของเรา</p>
+      <p class="lead" style="font-size:16px">ไปพร้อมเสียงด้วย เพื่อให้สะกดถูกและเขียนให้เข้ากับแอป: ข้อความ “เกี่ยวกับฉัน” · คำในพจนานุกรม · คำเรียกวลีลัด · ชื่อแอปที่กำลังพิมพ์ · ข้อความก่อนเคอร์เซอร์ไม่เกิน 400 ตัวอักษร · และเมื่อคุณแก้คำที่พิมพ์ผิด จะส่งเฉพาะวลีสั้นๆ ที่แก้ไปให้ตัดสินว่าควรจำไหม — ปิดได้ทุกอย่างใน Settings</p>
+    </div>
+    <div class="list-card">
+      <div><span class="check">✓</span><div><b>ประวัติ พจนานุกรม และ key เก็บในเครื่อง</b><p>อ่านได้เฉพาะบัญชีผู้ใช้ของคุณ · ปิดการเก็บประวัติ เก็บ 7 วัน 30 วัน หรือล้างทั้งหมดได้ · log ไม่บันทึกสิ่งที่พูด</p></div></div>
+      <div><span class="check">✓</span><div><b>ไม่แตะช่องรหัสผ่าน Terminal และตัวจัดการรหัสผ่าน</b><p>ไม่อ่านข้อความในแอปเหล่านี้และไม่เรียนรู้คำจากที่นั่น · ช่อง Secure Input คัดลอกลง clipboard แทนการวาง · ข้อความจากวลีลัด (อีเมล ที่อยู่) ไม่ถูกส่ง</p></div></div>
+      <div><span class="check">✓</span><div><b>key ฟรี: Google อาจนำข้อมูลไปใช้</b><p>ตามเงื่อนไข Gemini API แบบไม่เสียเงิน Google อาจใช้สิ่งที่ส่งไปปรับปรุงบริการ และอาจมีคนตรวจอ่าน · ถ้ากังวลให้เปิด billing ใน AI Studio หรือใช้ Private mode</p></div></div>
+      <div><span class="check">✓</span><div><b>Private mode (ขั้นสูง)</b><p>ถอดเสียงด้วย Whisper ในเครื่อง ไม่ส่งอะไรขึ้น cloud เลย — ต้องติดตั้งเพิ่มเอง (ดูคำถามท้ายหน้า) · ถ้าคุณใส่ key ของ ElevenLabs ไว้ เสียงจะไปที่นั่นเฉพาะตอน Gemini ล่ม</p></div></div>
+    </div>
+  </div>
+  <div class="shortcuts">
+    <h3>ปุ่มลัด</h3>
+    <div class="sc-grid">
+      <div><span>กดค้างแล้วพูด ปล่อยแล้ววาง</span><span class="kc">Option ขวา</span></div>
+      <div><span>แฮนด์ฟรี — แตะอีกครั้งเพื่อจบ</span><em><span class="kc">Option ขวา</span>× 2</em></div>
+      <div><span>โหมดคำสั่ง (ระหว่างพูด)</span><span class="kc">Shift</span></div>
+      <div><span>ยกเลิก</span><span class="kc">Esc</span></div>
+      <div><span>วางข้อความล่าสุดอีกครั้ง</span><span class="kc">Ctrl + Option + V</span></div>
+      <div><span>เพิ่มคำที่เลือกลงพจนานุกรม</span><span class="kc">Ctrl + Option + D</span></div>
+    </div>
+  </div>
+</section>
+
+<section class="panel light install" id="install" style="z-index:8">
+  <div class="wrap" style="max-width:920px">
+    <div class="eyebrow">ติดตั้ง · ใช้เวลาราว 5 นาที</div>
+    <h2>โหลด ลาก เปิด แล้วพูดได้เลย</h2>
+    <div class="req"><span>macOS 14.2 ขึ้นไป</span><span>Mac ชิป Apple (M1 ขึ้นไป)</span><span>ต่อเน็ต</span><span>Gemini API key ฟรี</span></div>
+    <div class="dl">
+      <a class="btn" data-dl href="#install">ดาวน์โหลด WhisperFirst.dmg</a>
+      <small>เวอร์ชัน <span data-ver></span> · <span data-size></span></small>
+    </div>
+    <p class="sha">SHA-256 <code data-sha></code></p>
+
+    <ol class="steps">
+      <li><div>
+        <h3>เปิดไฟล์แล้วลากลง Applications</h3>
+        <p>ดับเบิลคลิก <b>WhisperFirst.dmg</b> ในโฟลเดอร์ Downloads → ลากไอคอน WhisperFirst ไปวางที่โฟลเดอร์ <b>Applications</b></p>
+      </div></li>
+      <li><div>
+        <h3>เปิดครั้งแรก macOS จะเตือน — กดผ่านครั้งเดียว</h3>
+        <p>เปิด WhisperFirst จาก Applications จะขึ้นว่า <span class="ui">“WhisperFirst” Not Opened</span> ให้ทำตามนี้</p>
+        <ol>
+          <li>กด <b>Done</b> (อย่ากด Move to Trash)</li>
+          <li>เปิด <b>System Settings → Privacy &amp; Security</b> แล้วเลื่อนลงล่างสุด</li>
+          <li>ตรงข้อความ <span class="ui">“WhisperFirst” was blocked…</span> กด <b>Open Anyway</b></li>
+          <li>ใส่รหัสผ่าน Mac หรือ Touch ID แล้วกด <b>Open Anyway</b> อีกครั้ง</li>
+          <li>ไม่เห็นปุ่ม Open Anyway? เปิด WhisperFirst ใหม่อีกครั้ง แล้วกลับไปที่ Privacy &amp; Security ภายใน 1 ชั่วโมง</li>
+        </ol>
+        <div class="note"><span aria-hidden="true">💡</span><span>ที่เตือนเพราะแอปนี้ทำแจกเพื่อน ไม่ได้ลงทะเบียนนักพัฒนากับ Apple ($99/ปี) ไม่ได้แปลว่ามีไวรัส · โค้ดทั้งหมดเปิดให้ดูได้บน <a href="https://github.com/Firstyjps/WhisperFirst">GitHub</a> · ทำครั้งเดียว ครั้งต่อไปเปิดได้ปกติ</span></div>
+      </div></li>
+      <li><div>
+        <h3>ให้สิทธิ์ตามไกด์ในแอป</h3>
+        <p><b>Microphone</b> — ฟังเสียงตอนกดค้างปุ่ม หรือตอนเปิดแฮนด์ฟรี · <b>Accessibility</b> — รู้ว่ากดปุ่มลัด และพิมพ์ข้อความลงแอปอื่นได้ · ถ้าใช้ลำโพงของจอ (HDMI/DisplayPort) จะมี <b>System Audio Recording</b> เพิ่ม เพื่อเช็กว่าเพลงกำลังเล่นอยู่ไหมก่อนหยุดให้ (ไม่บันทึกเสียง)</p>
+        <p>กด <b>Open Settings</b> ในไกด์ → เปิดสวิตช์ WhisperFirst → กลับมาที่ไกด์ จะติ๊กถูกให้เอง</p>
+      </div></li>
+      <li><div>
+        <h3>ใส่ Gemini API key (ฟรี)</h3>
+        <p>เข้า Google AI Studio ด้วยบัญชี Google → กด <b>Create API key</b> → คัดลอก แล้ววางในไกด์ของแอป</p>
+        <a class="btn" href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">เปิด Google AI Studio ↗</a>
+      </div></li>
+      <li><div>
+        <h3>ลองเลย</h3>
+        <p>คลิกในช่องพิมพ์ไหนก็ได้ กดค้าง <span class="kc">Option ขวา</span> พูด แล้วปล่อย 🎉</p>
+      </div></li>
+    </ol>
+    <p class="after">WhisperFirst อยู่ที่ไอคอนบน <b>menu bar มุมขวาบน</b> ของจอ (ไม่อยู่ใน Dock) · เปิดไกด์ซ้ำได้จากเมนูนั้น → <b>Welcome Guide…</b> · อยากให้เปิดเองตอนเปิดเครื่อง → <b>Launch at Login</b></p>
+  </div>
+</section>
+
+<section class="panel light faq" id="faq" style="z-index:9;background:var(--sand)">
+  <div class="wrap">
+    <h2>คำถามที่พบบ่อย</h2>
+    <div class="faq-list" id="faqList"></div>
+  </div>
+</section>
+</main>
+
+<footer class="panel dark" style="z-index:10">
+  <div class="foot-cta">
+    <h2>เลิกพิมพ์ แล้วเริ่มพูด</h2>
+    <p>ฟรี สำหรับ Mac · ใช้ Gemini key ฟรีของคุณเอง</p>
+    <a href="#install" class="btn" data-dl>ดาวน์โหลด WhisperFirst</a>
+  </div>
+  <div class="foot-links">
+    <span>สร้างมาเพื่อคนพูดไทย · เวอร์ชัน <span data-ver></span></span>
+    <div>
+      <a href="https://github.com/Firstyjps/WhisperFirst">GitHub</a>
+      <a href="#privacy">ความเป็นส่วนตัว</a>
+      <a href="https://github.com/Firstyjps/WhisperFirst/issues">แจ้งปัญหา</a>
+    </div>
+  </div>
+  <div class="wordmark reveal" data-span=".22" aria-hidden="true">WhisperFirst</div>
+</footer>
+
+<script src="assets/main.js"></script>
+</body>
+</html>

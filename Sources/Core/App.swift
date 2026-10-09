@@ -17,6 +17,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     private var wasTrusted = false
 
     func applicationDidFinishLaunching(_ n: Notification) {
+        // ห้ามเปิดซ้อน 2 ตัว (ปุ่มลัดจะทำงานซ้ำ) · ตัวที่เปิดทีหลังคือเวอร์ชันที่ผู้ใช้เพิ่งลากมาทับ → ปิดตัวเก่าแล้วทำงานแทน
+        let me = ProcessInfo.processInfo.processIdentifier
+        let others = NSRunningApplication.runningApplications(withBundleIdentifier: Bundle.main.bundleIdentifier ?? "com.kron.whisperfirst")
+            .filter { $0.processIdentifier != me && !$0.isTerminated }
+        if !others.isEmpty {
+            Log.write("มี WhisperFirst อีกตัวเปิดอยู่ (pid \(others.map(\.processIdentifier))) → ปิดตัวเก่า")
+            others.forEach { $0.terminate() }
+            let deadline = Date().addingTimeInterval(3)
+            while others.contains(where: { !$0.isTerminated }), Date() < deadline { RunLoop.current.run(until: Date().addingTimeInterval(0.1)) }
+            if others.contains(where: { !$0.isTerminated }) { Log.write("ตัวเก่าไม่ยอมปิด → ปิดตัวนี้แทน"); NSApp.terminate(nil); return }
+        }
+        Paths.seedFromBundle()
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         let menu = NSMenu()
         menu.delegate = self
@@ -204,6 +216,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     }
 
     private func guideClosed() {
+        let askedSystemAudio = guide?.systemAudioAsked ?? false
         guide?.stop()
         guide = nil
         guideWindow = nil
@@ -215,6 +228,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                 AVCaptureDevice.requestAccess(for: .audio) { ok in if !ok { Log.write("ไม่ได้สิทธิ์ไมค์") } }
             }
             if !AX.trusted { AX.prompt() }
+            // ลำโพงจอ: ขอสิทธิ์ฟังเสียงระบบตอนนี้ ไม่ให้ dialog เด้งกลางประโยคแรก
+            if !askedSystemAudio, Store.config.muteWhileTalking != .off, AudioDucker.pausesInsteadOfLowering { PlaybackProbe.requestPermission() }
         }
         hub?.settings.geminiKey = Keys.gemini ?? ""
         // ครั้งแรก → พาเข้าหน้าหลักต่อ (ยังไม่มี key → หน้า Settings) · เปิดซ้ำทีหลัง → กลับไปอยู่ menu bar

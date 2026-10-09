@@ -187,7 +187,9 @@ final class CheckupModel: ObservableObject {
         Task {
             let t0 = Date()
             var ok = false
-            if Keys.gemini != nil {
+            if Store.config.privateMode {
+                ok = LocalWhisper.available   // Private mode: ไม่ ping cloud — ดูแค่ว่าถอดในเครื่องได้
+            } else if Keys.gemini != nil {
                 ok = ((try? await Transcriber().complete(system: "Reply with OK only.", user: "ping", json: false)) ?? "").isEmpty == false
             }
             self.online = ok

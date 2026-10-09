@@ -344,18 +344,21 @@ final class Controller {
         state = .idle
         task = nil
         Log.write("error: \(error.localizedDescription)")
-        overlay.error("Transcription failed — check network/quota")
+        overlay.error(Transcriber.friendly(error))
     }
 
     private func deliver(_ r: DictationResult, command: Bool, seconds: Double, auto: Bool = false) {
         task = nil
         state = .idle
         var r = r
+        var usedSnippet = false
         // วลีลัด → ข้อความเต็ม (ขยายในเครื่อง ไม่ผ่านโมเดล)
         if !command {
             let x = Snippets.expand(r.text)
-            if !x.used.isEmpty { r.text = x.text; Log.write("snippet: ใช้ \(x.used.count) วลี") }
+            if !x.used.isEmpty { r.text = x.text; usedSnippet = true; Log.write("snippet: ใช้ \(x.used.count) วลี") }
         }
+        // terminal/ตัวจัดการรหัสผ่าน: ไม่อ่านข้อความในช่อง (แม้แต่ตัวเดียว) และไม่เรียนรู้คำจากการแก้
+        let privateApp = Self.noContextApps.contains(target.bundle)
         var text = r.text
         guard !text.isEmpty else {
             overlay.flash("No speech detected")
@@ -373,7 +376,7 @@ final class Controller {
             return
         }
         // พูดต่อจากข้อความเดิมในบรรทัดเดียวกัน → เว้นวรรคให้ (แบบไทย: เว้นระหว่างประโยค)
-        if !command, Store.config.useContext, let last = AX.textBeforeCursor(limit: 1)?.last, !last.isWhitespace,
+        if !command, Store.config.useContext, !privateApp, let last = AX.textBeforeCursor(limit: 1)?.last, !last.isWhitespace,
            let first = text.first, !first.isPunctuation, !first.isWhitespace {
             text = " " + text
         }
@@ -382,7 +385,8 @@ final class Controller {
         History.append(HistoryEntry(t: Date().timeIntervalSince1970, app: target.name, mode: command ? "command" : "dictate",
                                     text: r.text, model: r.model, ms: r.ms, sec: seconds, bundle: target.bundle))
         overlay.done(r.text)
-        if !command { learner.track(inserted: text) }
+        // ข้อความจาก snippet (อีเมล ที่อยู่ ลิงก์) ไม่ส่งไปให้โมเดลตัดสินคำ
+        if !command, !privateApp, !usedSnippet { learner.track(inserted: text) }
     }
 
     func pasteLast() {

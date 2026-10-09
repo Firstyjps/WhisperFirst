@@ -38,6 +38,10 @@ mkdir -p "$NEW/Contents/MacOS" "$NEW/Contents/Resources"
 cp "$BIN_DIR/WhisperFirst" "$NEW/Contents/MacOS/WhisperFirst"
 cp Info.plist "$NEW/Contents/Info.plist"
 cp Resources/AppIcon.icns Resources/MenuBarIconTemplate.png Resources/MenuBarIconTemplate@2x.png "$NEW/Contents/Resources/"
+# prompts + ไฟล์เริ่มต้นในตัวแอป — เครื่องที่ติดตั้งจาก DMG ใช้ตอนเปิดครั้งแรก (Paths.seedFromBundle)
+mkdir -p "$NEW/Contents/Resources/prompts" "$NEW/Contents/Resources/defaults"
+cp prompts/*.md "$NEW/Contents/Resources/prompts/"
+cp defaults/* "$NEW/Contents/Resources/defaults/"
 codesign --force --sign "$SIGN_ID" --identifier com.kron.whisperfirst --options runtime \
   --entitlements WhisperFirst.entitlements --timestamp=none "$NEW"
 codesign --verify --strict "$NEW"

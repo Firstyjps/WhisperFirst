@@ -13,6 +13,33 @@ enum Paths {
     static var history: URL { support.appendingPathComponent("history.jsonl") }
     /// log อยู่ใน ~/Library/Logs (สิทธิ์ 600, หมุนไฟล์ที่ 2MB) · ไม่เก็บข้อความที่พูด
     static let log = URL(fileURLWithPath: NSHomeDirectory() + "/Library/Logs/WhisperFirst/whisperfirst.log")
+
+    /// ติดตั้งจาก DMG (ไม่ผ่าน build.sh) → เอา prompts + ไฟล์เริ่มต้นจากในตัวแอปมาวาง
+    /// - dictionary/about-me: วางครั้งแรกเท่านั้น
+    /// - prompts: วางถ้ายังไม่มี · แอปเวอร์ชันใหม่มี prompt ใหม่ → ทับเฉพาะไฟล์ที่ผู้ใช้ไม่ได้แก้ (เทียบกับสำเนา .orig ที่วางไว้รอบก่อน)
+    static func seedFromBundle(resources: URL? = Bundle.main.resourceURL, into support: URL = support) {
+        guard let res = resources else { return }
+        let fm = FileManager.default
+        let bundled = res.appendingPathComponent("prompts")
+        guard fm.fileExists(atPath: bundled.path) else { return }   // รันจาก CLI — ไม่มี Resources
+        let prompts = support.appendingPathComponent("prompts")
+        try? fm.createDirectory(at: prompts, withIntermediateDirectories: true)
+        for name in ["dictionary.txt", "about-me.md"] {
+            let dst = support.appendingPathComponent(name), src = res.appendingPathComponent("defaults/\(name)")
+            if !fm.fileExists(atPath: dst.path) { try? fm.copyItem(at: src, to: dst) }
+        }
+        for file in (try? fm.contentsOfDirectory(at: bundled, includingPropertiesForKeys: nil)) ?? [] where file.pathExtension == "md" {
+            let dst = prompts.appendingPathComponent(file.lastPathComponent)
+            let orig = prompts.appendingPathComponent("." + file.lastPathComponent + ".orig")
+            guard let new = try? Data(contentsOf: file) else { continue }
+            let current = try? Data(contentsOf: dst)
+            if current == new { try? new.write(to: orig, options: .atomic); continue }
+            if current == nil || current == (try? Data(contentsOf: orig)) {
+                try? new.write(to: dst, options: .atomic)
+                try? new.write(to: orig, options: .atomic)
+            }
+        }
+    }
 }
 
 /// ปุ่มที่กดค้างเพื่อพูด (ปุ่ม modifier ฝั่งขวา ไม่ชนกับคีย์ลัดทั่วไป)

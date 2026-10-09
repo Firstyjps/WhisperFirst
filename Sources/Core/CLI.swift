@@ -27,6 +27,7 @@ public enum WFCLI {
         if args.count >= 3, args[1] == "live" { return liveTest(args[2]) }
         if args.count >= 3, args[1] == "render-hub" { return renderHub(args[2]) }
         if args.count >= 3, args[1] == "render-guide" { return renderGuide(args[2]) }
+        if args.count >= 2, args[1] == "seed-test" { return seedTest() }
         guard args.count >= 3, args[1] == "transcribe" else {
             print("ใช้: wf stream <file.wav> [--gap 0.5] [--nospec]   (จำลองพูดตามเวลาจริง วัดเวลาหลังปล่อยปุ่ม)")
             print("    wf learn \"ข้อความที่ระบบวาง\" \"ข้อความหลังแก้\"   (ทดสอบ diff + การตัดสินคำ ไม่เขียนพจนานุกรม)")
@@ -481,6 +482,54 @@ public enum WFCLI {
     }
 
     /// เรนเดอร์ไกด์ครั้งแรกทุกขั้นเป็นภาพ → <prefix>-<ขั้น>.png (ใช้ปุ่มลัดค่าเริ่มต้น)
+    /// ทดสอบ Paths.seedFromBundle (ติดตั้งจาก DMG) ในโฟลเดอร์ชั่วคราว — ไม่แตะไฟล์ของผู้ใช้
+    static func seedTest() {
+        let fm = FileManager.default
+        let tmp = fm.temporaryDirectory.appendingPathComponent("wf-seed-\(UUID().uuidString)")
+        let res = tmp.appendingPathComponent("Resources"), sup = tmp.appendingPathComponent("Support")
+        defer { try? fm.removeItem(at: tmp) }
+        func put(_ url: URL, _ text: String) {
+            try? fm.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try? text.write(to: url, atomically: true, encoding: .utf8)
+        }
+        func read(_ rel: String) -> String? { try? String(contentsOf: sup.appendingPathComponent(rel), encoding: .utf8) }
+        var fails = 0
+        func check(_ name: String, _ ok: Bool) { print("\(ok ? "✓" : "✗") \(name)"); if !ok { fails += 1 } }
+
+        put(res.appendingPathComponent("prompts/dictate.md"), "D1")
+        put(res.appendingPathComponent("prompts/command.md"), "C1")
+        put(res.appendingPathComponent("defaults/dictionary.txt"), "dict-default")
+        put(res.appendingPathComponent("defaults/about-me.md"), "about-default")
+
+        Paths.seedFromBundle(resources: res, into: sup)
+        check("ติดตั้งใหม่: วาง prompts", read("prompts/dictate.md") == "D1" && read("prompts/command.md") == "C1")
+        check("ติดตั้งใหม่: วาง dictionary/about-me", read("dictionary.txt") == "dict-default" && read("about-me.md") == "about-default")
+        check("ติดตั้งใหม่: เก็บสำเนา .orig", read("prompts/.dictate.md.orig") == "D1")
+
+        put(sup.appendingPathComponent("prompts/dictate.md"), "D1-user-edit")
+        put(sup.appendingPathComponent("dictionary.txt"), "my words")
+        put(res.appendingPathComponent("prompts/dictate.md"), "D2")
+        put(res.appendingPathComponent("prompts/command.md"), "C2")
+        put(res.appendingPathComponent("defaults/dictionary.txt"), "dict-default-2")
+        Paths.seedFromBundle(resources: res, into: sup)
+        check("อัปเดต: prompt ที่ผู้ใช้แก้ ไม่ถูกทับ", read("prompts/dictate.md") == "D1-user-edit")
+        check("อัปเดต: prompt ที่ไม่ได้แก้ ได้ของใหม่", read("prompts/command.md") == "C2" && read("prompts/.command.md.orig") == "C2")
+        check("อัปเดต: dictionary ของผู้ใช้ไม่ถูกทับ", read("dictionary.txt") == "my words")
+
+        let legacy = tmp.appendingPathComponent("Legacy")
+        put(legacy.appendingPathComponent("prompts/dictate.md"), "D2")
+        put(legacy.appendingPathComponent("prompts/command.md"), "C-owner-edit")
+        Paths.seedFromBundle(resources: res, into: legacy)
+        let lread = { (r: String) in try? String(contentsOf: legacy.appendingPathComponent(r), encoding: .utf8) }
+        check("ติดตั้งเดิม (build.sh): prompt เท่ากัน → เก็บ .orig", lread("prompts/.dictate.md.orig") == "D2")
+        check("ติดตั้งเดิม: prompt ที่แก้ไว้แต่ไม่มี .orig ไม่ถูกทับ", lread("prompts/command.md") == "C-owner-edit")
+
+        Paths.seedFromBundle(resources: tmp.appendingPathComponent("none"), into: sup)
+        check("ไม่มี Resources (CLI) → ไม่ทำอะไร", read("prompts/dictate.md") == "D1-user-edit")
+        print(fails == 0 ? "ผ่านทั้งหมด" : "ไม่ผ่าน \(fails) กรณี")
+        if fails > 0 { exit(1) }
+    }
+
     static func renderGuide(_ prefix: String) {
         MainActor.assumeIsolated {
             let sc = ShortcutsModel(engine: ShortcutEngine())

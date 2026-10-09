@@ -72,7 +72,7 @@ final class LocalWhisper: @unchecked Sendable {
     /// พร้อมใช้ไหม (มีตัวโปรแกรม + โมเดล) — ใช้แสดงสถานะใน Settings
     static var status: String {
         guard serverPath != nil else { return "Needs whisper.cpp — run: brew install whisper-cpp" }
-        guard let m = modelURL else { return "No Whisper model found" }
+        guard let m = modelURL else { return "No model yet — put ggml-large-v3.bin (~3 GB) in Application Support/WhisperFirst/models" }
         return "On-device model: \(m.deletingPathExtension().lastPathComponent.replacingOccurrences(of: "ggml-", with: ""))"
     }
     static var available: Bool { serverPath != nil && modelURL != nil }

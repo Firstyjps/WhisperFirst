@@ -3,3 +3,9 @@
 *.xcodeproj/
 .DS_Store
 bench/samples/_*.wav
+dist/
+
+# งานในเครื่อง ไม่ขึ้น repo สาธารณะ
+.claude/
+AUDIT-*.md
+website/

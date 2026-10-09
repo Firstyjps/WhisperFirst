@@ -37,12 +37,13 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
     /// ต้องมีอย่างน้อย 1 ชุดไหม (ถังขยะซ่อนเมื่อเหลือชุดเดียว)
     var required: Bool { self == .pushToTalk }
 
-    /// ปุ่มเมาส์ข้าง: Mouse 4 (m:3) = แฮนด์ฟรี · Mouse 5 (m:4) = Enter — ไม่มีปุ่มข้าง ก็แค่ไม่ถูกใช้
+    /// ไม่ผูกปุ่มเมาส์ข้างเป็นค่าเริ่มต้น — Mouse 4/5 คือ Back/Forward ของเบราว์เซอร์ (กลืนแล้วไมค์เปิด/ส่ง Enter โดยไม่ตั้งใจ)
+    /// ผู้ใช้ตั้งเองได้ในหน้า Shortcuts (m:3 = Mouse 4, m:4 = Mouse 5)
     static let defaults: [ShortcutAction: [KeyCombo]] = [
         .pushToTalk: [["ropt"]],
-        .handsFree: [["m:3"]],
+        .handsFree: [],
         .commandMode: [],
-        .pressEnter: [["m:4"]],
+        .pressEnter: [],
         .pasteLast: [["ctrl", "opt", "k:9"]],
         .addWord: [["ctrl", "opt", "k:2"]],
     ]

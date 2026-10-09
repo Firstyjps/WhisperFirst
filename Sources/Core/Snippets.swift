@@ -155,7 +155,7 @@ struct SnippetsPage: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
             PageTitle(title: "Snippets",
-                      subtitle: "Say a short phrase, get the full text — your email, a meeting link, an address. Expanded on your Mac; the text itself is never sent to the model.")
+                      subtitle: "Say a short phrase, get the full text — your email, a meeting link, an address. Expanded on your Mac after the model writes the trigger; the full text isn't sent to the model.")
             editor
             if m.items.isEmpty { examples } else { list }
         }

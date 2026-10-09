@@ -5,7 +5,7 @@ import PackageDescription
 
 let package = Package(
     name: "WhisperFirst",
-    platforms: [.macOS(.v14)],
+    platforms: [.macOS("14.2")],   // CATapDescription (หยุดเพลงบนลำโพงจอ) มีตั้งแต่ 14.2 — ลิงก์แบบ strong
     products: [
         .executable(name: "WhisperFirst", targets: ["Launcher"]),
         .executable(name: "wf", targets: ["CLI"]),

@@ -181,6 +181,19 @@ final class Transcriber {
         Log.write("quota 429 → งดยิงคู่ขนาน/ล่วงหน้า 60 วิ")
     }
 
+    /// ข้อความ error ที่ผู้ใช้อ่านแล้วรู้ว่าต้องทำอะไร (แยก key ผิด / โควตาเต็ม / ออฟไลน์ / server ล่ม)
+    static func friendly(_ error: Error) -> String {
+        let m = error.localizedDescription
+        if m.contains("ยังไม่ได้ใส่ Gemini API key") || m.contains("ไม่มี Gemini API key") { return "No Gemini API key — add one in Settings" }
+        if m.contains("API key not valid") || m.contains("API_KEY_INVALID") || m.contains("HTTP 400") || m.contains("HTTP 401") || m.contains("HTTP 403") {
+            return "Gemini key rejected — check it in Settings"
+        }
+        if m.contains("HTTP 429") { return "Gemini free quota used up — wait a minute and retry" }
+        if m.contains("ออฟไลน์") || !Net.shared.isOnline || (error as? URLError)?.code == .notConnectedToInternet { return "You're offline — check your internet" }
+        if m.contains("Command mode") { return m.components(separatedBy: "\n").first ?? m }
+        return "Gemini is busy or down — try again"
+    }
+
     /// models = nil → ใช้รายการใน config · fallback = false → ไม่ใช้ ElevenLabs (รอบล่วงหน้า)
     func run(_ input: DictationInput, models: [String]? = nil, fallback: Bool = true) async throws -> DictationResult {
         let cfg = Store.config
@@ -196,6 +209,8 @@ final class Transcriber {
             return try await local(input, t0)
         }
         guard input.transcript == nil || Net.shared.isOnline else { throw WFError("ออฟไลน์") }
+        // เปิด Private mode กลางการอัด → ทางข้อความ (cloud) ห้ามไป · session จะกลับไปใช้เสียง → ถอดในเครื่อง
+        guard !(cfg.privateMode && input.transcript != nil) else { throw WFError("Private mode — ไม่ใช้ทางข้อความ cloud") }
 
         if let key = Keys.gemini, !models.isEmpty {
             switch await hedged(models: models, key: key, system: system, input: input) {
@@ -364,8 +379,9 @@ final class Transcriber {
     }
 
     /// เรียกโมเดลแบบข้อความล้วน (ใช้ตัดสินคำที่ระบบเรียนรู้) — ใช้ตัวแรกในรายการ (แม่นสุด ไม่รีบ)
-    func complete(system: String, user: String, json: Bool) async throws -> String {
-        guard let key = Keys.gemini, let model = Store.config.models.first else { throw WFError("ไม่มี Gemini API key") }
+    func complete(system: String, user: String, json: Bool, key: String? = nil) async throws -> String {
+        guard !Store.config.privateMode else { throw WFError("Private mode — ไม่ส่งขึ้น cloud") }
+        guard let key = key ?? Keys.gemini, let model = Store.config.models.first else { throw WFError("ไม่มี Gemini API key") }
         var cfg: [String: Any] = ["temperature": 0, "thinkingConfig": ["thinkingLevel": model.contains("lite") ? "minimal" : "low"]]
         if json { cfg["responseMimeType"] = "application/json" }
         let body: [String: Any] = [

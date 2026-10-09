@@ -89,6 +89,8 @@ Wispr Flow เร็วเพราะส่งเสียงไปประม
 ## ไฟล์
 - โค้ด: `Sources/Core/*` (ลิงก์ static เข้าตัวแอป) · `Sources/Launcher` (จุดเข้า) — ทั้งแอปเป็นไฟล์เดียว ไม่โหลด dylib จากภายนอก
 - การ sign: `./build.sh` sign ด้วยใบรับรอง self-signed ในเครื่อง "WhisperFirst Local Signing" (สร้างให้อัตโนมัติครั้งแรกผ่าน `scripts/make-signing-cert.sh`) + hardened runtime (`WhisperFirst.entitlements` = ไมค์อย่างเดียว) → macOS ผูกสิทธิ์ไมค์/Accessibility กับใบรับรอง: build ใหม่ไม่ต้องให้สิทธิ์ซ้ำ · แอปที่ถูกแก้หรือ sign ด้วยอย่างอื่นไม่ได้สิทธิ์ · DYLD injection ถูกบล็อก
+- **สำรองใบรับรอง (สำคัญ)**: DMG ที่แจกผูกสิทธิ์ไมค์/Accessibility ของผู้ใช้ไว้กับใบนี้ (SHA-1 `F271BE8D…C0E1`) — ใบหาย = ทุกคนต้องให้สิทธิ์ใหม่หลังอัปเดต · Keychain Access → login → My Certificates → "WhisperFirst Local Signing" → Export… เป็น .p12 พร้อมรหัสผ่าน เก็บใน password manager · กู้: ดับเบิลคลิก .p12 บนเครื่องใหม่ · `scripts/release.sh` ไม่ยอม sign ถ้าไม่ใช่ใบเดิม
+- **แจกเพื่อน**: `./scripts/release.sh X.Y.Z` (ต้อง commit ก่อน) → ใส่ version/size/sha256 ใน `RELEASE` ของ `docs/assets/main.js` → `./scripts/deploy.sh` · รายละเอียด server ใน `deploy/README.md` · `wf seed-test` ทดสอบการวาง prompts ตอนติดตั้งจาก DMG
 - ย้ายมาจากเวอร์ชัน dylib เดิม: ต้องให้สิทธิ์ Accessibility ใหม่ 1 ครั้ง (ลบรายการเก่าใน System Settings → เปิดแอป → เปิดสวิตช์)
 - ข้อมูล: `~/Library/Application Support/WhisperFirst/` → `.env` (API keys), `config.json`, `dictionary.txt`, `snippets.json`, `about-me.md`, `prompts/`, `history.jsonl`
 - log: `~/Library/Logs/WhisperFirst/whisperfirst.log` (อ่านได้เฉพาะผู้ใช้ · หมุนไฟล์ที่ 2 MB · ไม่บันทึกข้อความที่พูด)

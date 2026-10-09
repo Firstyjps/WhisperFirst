@@ -319,12 +319,12 @@ struct SettingsPage: View {
         section("Privacy") {
             VStack(alignment: .leading, spacing: 6) {
                 Text("What leaves your Mac").font(.system(size: 14, weight: .semibold))
-                Text("Only while you hold the key: your voice goes to Google Gemini to become text. With “Look at nearby text”, a few lines before your cursor go too (never from password fields, terminals or password managers). “Learn from my corrections” sends the phrase you fixed. The backup engine (ElevenLabs) is used only if Gemini is down. With Private mode on, nothing is sent — Whisper runs on this Mac.")
+                Text("While you hold the key (or until you end hands-free), your voice goes to Google Gemini to become text, along with your About-you note, your dictionary words, snippet triggers and the name of the app you're typing in. “Look at nearby text” adds up to 400 characters before your cursor. “Learn from my corrections” sends the short phrase you fixed. Never from password fields, terminals or password managers. If you added an ElevenLabs key, your audio goes there only when Gemini is down. Free Gemini keys: Google may use what you send to improve its products, and people may review it. With Private mode on, nothing is sent — Whisper runs on this Mac.")
                     .font(.system(size: 12.5)).foregroundStyle(Theme.muted).lineSpacing(3).fixedSize(horizontal: false, vertical: true)
             }
             .padding(.horizontal, 20).padding(.vertical, 14)
             divider
-            row("Private mode", "Transcribe on this Mac only — nothing leaves it · slower, less polished · no Command mode") {
+            row("Private mode (advanced)", "Transcribe on this Mac only — nothing leaves it · needs whisper.cpp + a 3 GB model · slower, less polished · no Command mode") {
                 toggle("Private mode", $s.privateMode)
             }
             .opacity(LocalWhisper.available ? 1 : 0.45).disabled(!LocalWhisper.available && !s.privateMode)

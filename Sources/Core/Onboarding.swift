@@ -17,6 +17,13 @@ final class OnboardingModel: ObservableObject {
     @Published var ax = false
     @Published var geminiKey = Keys.gemini ?? ""
     @Published var keySaved = Keys.gemini != nil
+    /// ทดสอบ key ก่อนบันทึก — วาง key ผิดแล้วไม่รู้ตัวคือสาเหตุอันดับหนึ่งที่ "ติดตั้งแล้วใช้ไม่ได้"
+    enum KeyCheck: Equatable { case idle, checking, bad(String) }
+    @Published var keyCheck: KeyCheck = .idle
+    private var rejectedKey = ""
+    /// ลำโพงจอ (HDMI/DisplayPort) → หยุดเพลงแทนลดเสียง ต้องใช้สิทธิ์ System Audio Recording (ไม่บันทึกเสียง)
+    let needsSystemAudio = AudioDucker.pausesInsteadOfLowering && Store.config.muteWhileTalking != .off
+    @Published var systemAudioAsked = false
     @Published var practice = ""
     @Published var tried = false
     @Published var loginItem = SMAppService.mainApp.status == .enabled
@@ -77,10 +84,37 @@ final class OnboardingModel: ObservableObject {
         loginItem = SMAppService.mainApp.status == .enabled
     }
 
+    func requestSystemAudio() {
+        PlaybackProbe.requestPermission()
+        systemAudioAsked = true
+    }
+
     func next() {
         // ช่องว่าง = ข้าม (ไม่ลบ key เดิมทิ้ง)
         let k = geminiKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        if step == .apiKey, !k.isEmpty, k != (Keys.gemini ?? "") { saveKey() }
+        if step == .apiKey, !k.isEmpty, k != (Keys.gemini ?? "") {
+            if keyCheck == .checking { return }
+            // ทดสอบไม่ผ่านแล้วกดซ้ำ = "Save anyway" · Private mode ไม่ยิง cloud → บันทึกเลย
+            if k == rejectedKey || Store.config.privateMode { saveKey(); keyCheck = .idle; advance(); return }
+            keyCheck = .checking
+            Task {
+                do {
+                    _ = try await Transcriber().complete(system: "Reply with OK only.", user: "ping", json: false, key: k)
+                    guard self.geminiKey.trimmingCharacters(in: .whitespacesAndNewlines) == k else { self.keyCheck = .idle; return }
+                    self.saveKey()
+                    self.keyCheck = .idle
+                    if self.step == .apiKey { self.advance() }
+                } catch {
+                    self.rejectedKey = k
+                    self.keyCheck = .bad(Transcriber.friendly(error))
+                }
+            }
+            return
+        }
+        advance()
+    }
+
+    private func advance() {
         if let n = Step(rawValue: step.rawValue + 1) { go(n) } else { onFinish() }
     }
 
@@ -159,7 +193,9 @@ struct OnboardingView: View {
         case .permissions: m.mic && m.ax ? "Continue" : "Continue anyway"
         case .apiKey:
             m.geminiKey.trimmingCharacters(in: .whitespaces).isEmpty ? "Skip for now"
-                : m.geminiKey == (Keys.gemini ?? "") ? "Continue" : "Save and continue"
+                : m.geminiKey == (Keys.gemini ?? "") ? "Continue"
+                : m.keyCheck == .checking ? "Checking key…"
+                : m.keyCheck != .idle ? "Save anyway" : "Save and continue"
         case .keys: "Try it out"
         case .tryIt: m.tried || !m.practice.isEmpty ? "Continue" : "Skip"
         case .done: "Start using WhisperFirst"
@@ -203,16 +239,24 @@ struct OnboardingView: View {
 
     private var permissions: some View {
         VStack(alignment: .leading, spacing: 18) {
-            PageTitle(title: "Two quick permissions", subtitle: "macOS asks once. You can change these later in System Settings → Privacy & Security.")
+            PageTitle(title: m.needsSystemAudio ? "A few quick permissions" : "Two quick permissions",
+                      subtitle: "macOS asks once. You can change these later in System Settings → Privacy & Security.")
                 .zoomIn(0)
             VStack(spacing: 0) {
-                permRow(icon: "mic.fill", title: "Microphone", detail: "To hear you while you hold the key. Nothing is recorded otherwise.",
+                permRow(icon: "mic.fill", title: "Microphone", detail: "To hear you while you hold the key, or in hands-free until you press again. Off the rest of the time.",
                         ok: m.mic, button: m.micDenied ? "Open Settings" : "Allow", ripple: true) { m.requestMic() }
                     .flipIn(1)
                 Rectangle().fill(Theme.hairline).frame(height: 1)
                 permRow(icon: "keyboard", title: "Accessibility", detail: "To notice your shortcut and type the text into other apps.",
                         ok: m.ax, button: "Open Settings") { m.requestAX() }
                     .flipIn(2)
+                if m.needsSystemAudio {
+                    Rectangle().fill(Theme.hairline).frame(height: 1)
+                    permRow(icon: "speaker.wave.2", title: "System audio (for your monitor speakers)",
+                            detail: "Your speakers can't be turned down, so WhisperFirst pauses music instead. It checks for a split second whether something is playing — nothing is recorded.",
+                            ok: m.systemAudioAsked, okLabel: "Asked", button: "Allow") { m.requestSystemAudio() }
+                        .flipIn(3)
+                }
             }
             .wfCard()
             if !m.ax {
@@ -228,7 +272,7 @@ struct OnboardingView: View {
         }
     }
 
-    private func permRow(icon: String, title: String, detail: String, ok: Bool, button: String, ripple: Bool = false,
+    private func permRow(icon: String, title: String, detail: String, ok: Bool, okLabel: String = "Allowed", button: String, ripple: Bool = false,
                          action: @escaping () -> Void) -> some View {
         HStack(spacing: 14) {
             Image(systemName: icon).font(.system(size: 15)).foregroundStyle(Theme.accentText)
@@ -241,7 +285,7 @@ struct OnboardingView: View {
             Spacer()
             ZStack(alignment: .trailing) {
                 if ok {
-                    Label("Allowed", systemImage: "checkmark.circle.fill").font(.system(size: 12.5, weight: .semibold))
+                    Label(okLabel, systemImage: "checkmark.circle.fill").font(.system(size: 12.5, weight: .semibold))
                         .foregroundStyle(Theme.successText)
                         .padding(.horizontal, 11).padding(.vertical, 5).background(Capsule().fill(Theme.successBg))
                         .transition(.scale(scale: 0.5).combined(with: .opacity))
@@ -291,9 +335,22 @@ struct OnboardingView: View {
                         .wfOutline(10)
                     if m.keySaved && m.geminiKey == (Keys.gemini ?? "") {
                         Image(systemName: "checkmark.circle.fill").foregroundStyle(Theme.successText)
+                    } else if m.keyCheck == .checking {
+                        ProgressView().controlSize(.small)
                     }
                 }
                 .padding(.leading, 32)
+                .onChange(of: m.geminiKey) { if m.keyCheck != .checking { m.keyCheck = .idle } }
+                if case .bad(let why) = m.keyCheck {
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Theme.warnText)
+                        Text("\(why). Copy the whole key from AI Studio and try again — or save it anyway.")
+                            .font(.system(size: 12.5)).foregroundStyle(Theme.warnText).fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(.horizontal, 12).padding(.vertical, 9)
+                    .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Theme.warnBg))
+                    .padding(.leading, 32)
+                }
             }
             .padding(20).wfCard()
             .blurIn(1, radius: 22, pace: Self.keyPace)
@@ -405,7 +462,7 @@ struct OnboardingView: View {
         case .listening: overlay.handsFree ? "Listening… press again when you're done" : "Listening… let go when you're done"
         case .thinking: "Polishing…"
         case .done: "Done!"
-        case .error: "Something went wrong — try again"
+        case .error: overlay.message.isEmpty ? "Something went wrong — try again" : overlay.message
         default: "Try: “สวัสดีครับ วันนี้อากาศดีมาก”"
         }
     }
