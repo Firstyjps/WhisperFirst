@@ -37,11 +37,12 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
     /// ต้องมีอย่างน้อย 1 ชุดไหม (ถังขยะซ่อนเมื่อเหลือชุดเดียว)
     var required: Bool { self == .pushToTalk }
 
+    /// ปุ่มเมาส์ข้าง: Mouse 4 (m:3) = แฮนด์ฟรี · Mouse 5 (m:4) = Enter — ไม่มีปุ่มข้าง ก็แค่ไม่ถูกใช้
     static let defaults: [ShortcutAction: [KeyCombo]] = [
         .pushToTalk: [["ropt"]],
-        .handsFree: [],
+        .handsFree: [["m:3"]],
         .commandMode: [],
-        .pressEnter: [],
+        .pressEnter: [["m:4"]],
         .pasteLast: [["ctrl", "opt", "k:9"]],
         .addWord: [["ctrl", "opt", "k:2"]],
     ]

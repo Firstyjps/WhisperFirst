@@ -311,7 +311,15 @@ struct HelpPage: View {
             Step(n: 4, title: "Typed for you", detail: "Let go — the text appears in about 2 seconds", icon: "character.cursor.ibeam", bg: 0xE6F4EA, fg: 0x2E8B4E),
         ]
         VStack(alignment: .leading, spacing: 18) {
-            PageTitle(title: "How it works", subtitle: "From your voice to finished text in about two seconds.")
+            HStack(alignment: .top) {
+                PageTitle(title: "How it works", subtitle: "From your voice to finished text in about two seconds.")
+                Spacer()
+                Button { m.onGuide() } label: { Label("Welcome guide", systemImage: "sparkles") }.buttonStyle(.plain)
+                    .font(.system(size: 13, weight: .medium)).foregroundStyle(Theme.inkSecondary)
+                    .padding(.horizontal, 14).padding(.vertical, 7)
+                    .background(Capsule().fill(Theme.card)).overlay(Capsule().strokeBorder(Theme.stroke, lineWidth: 1))
+                    .padding(.top, 10)
+            }
             HStack(spacing: 8) {
                 ForEach(steps, id: \.n) { s in
                     if s.n > 1 { Image(systemName: "chevron.right").font(.system(size: 11)).foregroundStyle(Theme.faint) }
@@ -398,17 +406,18 @@ struct HelpPage: View {
         let sc = m.settings.shortcuts
         let rows: [(AnyView, String, String)] = [
             (AnyView(Keycaps(combo: ptt)), "Push to talk", "Hold, speak, let go"),
-            (AnyView(HStack(spacing: 4) { Keycap(text: "2×"); Keycaps(combo: ptt) }), "Hands-free", "Double-tap to start, tap again to finish"),
+            (AnyView(HStack(spacing: 4) { Keycap(text: "2×"); Keycaps(combo: ptt); ForEach(Array(sc.combos(.handsFree).prefix(1).enumerated()), id: \.offset) { _, c in Text("or").font(.system(size: 11.5)).foregroundStyle(Theme.faint); Keycaps(combo: c) } }),
+             "Hands-free", "Double-tap to start, tap again to finish"),
             (AnyView(Keycap(text: "⇧")), "Command mode", "Press while talking to edit selected text"),
             (AnyView(Keycap(text: "Esc")), "Cancel", "While talking or waiting"),
             (AnyView(Keycaps(combo: sc.combos(.addWord).first)), "Teach a word", "Select it in any app, then press"),
             (AnyView(Keycaps(combo: sc.combos(.pasteLast).first)), "Paste again", "Your most recent text"),
-        ]
+        ] + (sc.combos(.pressEnter).first.map { [(AnyView(Keycaps(combo: $0)), "Press Enter", "Send the message")] } ?? [])
         return VStack(spacing: 0) {
             ForEach(Array(rows.enumerated()), id: \.offset) { i, r in
                 if i > 0 { Rectangle().fill(Theme.hairline).frame(height: 1) }
                 HStack(alignment: .center, spacing: 12) {
-                    r.0.frame(width: 130, alignment: .leading)
+                    r.0.fixedSize().frame(width: 180, alignment: .leading)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(r.1).font(.system(size: 13.5, weight: .semibold))
                         Text(r.2).font(.system(size: 12)).foregroundStyle(Theme.muted)

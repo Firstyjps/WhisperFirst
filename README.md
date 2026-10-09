@@ -46,8 +46,8 @@ voice processing ของ macOS (ลดเสียงรบกวน + ตั�
 - ปิดได้ที่ Settings → General → Reduce background noise · วัดเวลาเปิดไมค์: `open -n -W --stdout out.txt ~/Applications/WhisperFirst.app --args --mic-bench`
 
 ## เพลง/วิดีโอระหว่างพูด
-Settings → General → Music and videos while I talk (Leave / **Lower** / Mute) — คืนค่าเดิมทันทีที่ปล่อยปุ่ม
-- ลำโพงปรับเสียงได้ (MacBook, AirPods, HomePod, USB) → ลดเหลือครึ่งหนึ่ง (หรือปิดเสียง) หลังเสียง Tink · ค่อยๆ ลดเฉพาะลำโพงในเครื่อง/USB (AirPlay ตั้งครั้งเดียว) · ผู้ใช้ปรับเสียงเองระหว่างพูด → ไม่ทับ · แอปปิดกลางคัน → คืนค่าตอนเปิดครั้งถัดไป
+Settings → General → Music and videos while I talk (Leave / **Mute**) — คืนค่าเดิมทันทีที่ปล่อยปุ่ม
+- ลำโพงปรับเสียงได้ (MacBook, AirPods, HomePod, USB) → ปิดเสียงหลังเสียง Tink (ปิดเสียงไม่ได้ → ค่อยๆ ลดจนเงียบ) · ค่อยๆ ลดเฉพาะลำโพงในเครื่อง/USB (AirPlay ตั้งครั้งเดียว) · ผู้ใช้ปรับเสียงเองระหว่างพูด → ไม่ทับ · แอปปิดกลางคัน → คืนค่าตอนเปิดครั้งถัดไป
 - ลำโพงปรับเสียงไม่ได้ (จอผ่าน HDMI/DisplayPort) → กด play/pause เฉพาะเมื่อแอปเพลง/เบราว์เซอร์กำลังส่งเสียงจริง (Core Audio process list, macOS 14.2+) แล้วกดเล่นต่อตอนปล่อยปุ่ม · ตรวจซ้ำ: ปุ่มไปโดนแอปอื่น → กดคืน · ไม่ยุ่ง Zoom/แอปอื่น
 - `wf duck-test` ดูว่าลำโพงตอนนี้ใช้วิธีไหน + แอปที่กำลังส่งเสียง
 

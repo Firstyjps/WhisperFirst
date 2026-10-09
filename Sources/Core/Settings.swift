@@ -153,7 +153,7 @@ struct SettingsPage: View {
                 }
                 divider
                 row("Music and videos while I talk", "Back when you let go · monitor speakers pause instead") {
-                    Segmented(items: [(AudioDucker.Mode.off, "Leave"), (.lower, "Lower"), (.mute, "Mute")],
+                    Segmented(items: [(AudioDucker.Mode.off, "Leave"), (.mute, "Mute")],
                               selection: s.muteWhileTalking, capsule: false, fontSize: 12.5) { s.muteWhileTalking = $0 }
                 }
             }

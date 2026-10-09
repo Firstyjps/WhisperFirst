@@ -93,8 +93,8 @@ struct Config: Codable {
     var restoreClipboard = true
     /// ลดเสียงรบกวนจากไมค์ด้วย voice processing ของ macOS (แอปอื่นเบาลงเล็กน้อยระหว่างพูด)
     var noiseReduction = true
-    /// ระหว่างพูด: ลดเสียง/ปิดเสียงลำโพง (เพลง วิดีโอ) แล้วคืนค่าเดิมตอนปล่อยปุ่ม · ลำโพงที่ปรับเสียงไม่ได้ → หยุดเพลงแทน
-    var muteWhileTalking: AudioDucker.Mode = .lower
+    /// ระหว่างพูด: ปิดเสียงลำโพง (เพลง วิดีโอ) แล้วคืนค่าเดิมตอนปล่อยปุ่ม · ลำโพงที่ปรับเสียงไม่ได้ → หยุดเพลงแทน
+    var muteWhileTalking: AudioDucker.Mode = .mute
     /// Private mode: ถอดเสียงในเครื่องเท่านั้น (Whisper) ไม่ส่งเสียง/ข้อความขึ้น cloud เลย
     var privateMode = false
     /// เน็ตหลุด/cloud ล่ม → ถอดในเครื่องแทน
@@ -106,6 +106,8 @@ struct Config: Codable {
     var historyDays = 30
     /// ใช้ key จาก ~/.config/elevenlabs/api_key (ของเครื่องมืออื่น) ได้ — ต้องเปิดเอง
     var useSystemElevenLabsKey = false
+    /// ผ่านไกด์ครั้งแรกแล้ว (config เก่าที่ไม่มีค่านี้ = ใช้แอปอยู่แล้ว ไม่ต้องโชว์)
+    var onboarded = false
     /// bundle id → ลักษณะการเขียนในแอปนั้น
     var appHints: [String: String] = Config.defaultHints
 
@@ -143,6 +145,7 @@ struct Config: Codable {
         historyDays = v(.historyDays, d.historyDays)
         useSystemElevenLabsKey = v(.useSystemElevenLabsKey, d.useSystemElevenLabsKey)
         appHints = v(.appHints, d.appHints)
+        onboarded = v(.onboarded, true)
     }
 
     var shortcutBindings: [ShortcutAction: [KeyCombo]] {

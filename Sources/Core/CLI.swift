@@ -26,6 +26,7 @@ public enum WFCLI {
         if args.count >= 3, args[1] == "render-island" { return renderIsland(args[2]) }
         if args.count >= 3, args[1] == "live" { return liveTest(args[2]) }
         if args.count >= 3, args[1] == "render-hub" { return renderHub(args[2]) }
+        if args.count >= 3, args[1] == "render-guide" { return renderGuide(args[2]) }
         guard args.count >= 3, args[1] == "transcribe" else {
             print("ใช้: wf stream <file.wav> [--gap 0.5] [--nospec]   (จำลองพูดตามเวลาจริง วัดเวลาหลังปล่อยปุ่ม)")
             print("    wf learn \"ข้อความที่ระบบวาง\" \"ข้อความหลังแก้\"   (ทดสอบ diff + การตัดสินคำ ไม่เขียนพจนานุกรม)")
@@ -419,11 +420,11 @@ public enum WFCLI {
                 }
                 func wait(_ s: Double) { RunLoop.main.run(until: Date().addingTimeInterval(s)) }
                 let d = AudioDucker()
-                print("ก่อน \(vol())"); d.duck(.lower); wait(1); print("ระหว่างพูด \(vol())")
+                print("ก่อน \(vol())"); d.duck(.mute); wait(1); print("ระหว่างพูด \(vol())")
                 d.restore(); wait(0.3); print("คืน +0.3s \(vol())"); wait(1.5); print("คืน +1.8s \(vol())"); wait(2); print("คืน +3.8s \(vol())")
             }
             for b in ["com.google.Chrome.helper", "com.spotify.client", "com.apple.WebKit.GPU", "us.zoom.xos", "com.kron.friday"] {
-                print("  \(b): \(AudioDucker.isMedia(b) ? "เพลง/วิดีโอ → หยุดได้" : "ไม่ยุ่ง")")
+                print("  \(b): \(!AudioDucker.pausable([b]).isEmpty ? "เพลง/วิดีโอ → หยุดได้" : "ไม่ยุ่ง")")
             }
         }
     }
@@ -477,6 +478,25 @@ public enum WFCLI {
         }
         print(fail == 0 ? "ผ่านทั้งหมด" : "ไม่ผ่าน \(fail) กรณี")
         if fail > 0 { exit(1) }
+    }
+
+    /// เรนเดอร์ไกด์ครั้งแรกทุกขั้นเป็นภาพ → <prefix>-<ขั้น>.png (ใช้ปุ่มลัดค่าเริ่มต้น)
+    static func renderGuide(_ prefix: String) {
+        MainActor.assumeIsolated {
+            let sc = ShortcutsModel(engine: ShortcutEngine())
+            sc.bindings = ShortcutAction.defaults
+            let g = OnboardingModel(shortcuts: sc, overlay: OverlayModel())
+            g.stop()
+            for step in OnboardingModel.Step.allCases {
+                g.step = step
+                let r = ImageRenderer(content: OnboardingView(m: g).environment(\.wfStill, true))   // ภาพนิ่ง = สถานะสุดท้ายของโมชั่น
+                r.scale = 1.5
+                guard let img = r.nsImage, let tiff = img.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff),
+                      let png = rep.representation(using: .png, properties: [:]) else { print("render ไม่ได้ \(step)"); continue }
+                try? png.write(to: URL(fileURLWithPath: "\(prefix)-\(step.rawValue)-\(step).png"))
+                print("saved \(prefix)-\(step.rawValue)-\(step).png")
+            }
+        }
     }
 
     /// เรนเดอร์หน้าต่างหลักแต่ละหน้าเป็นภาพ (ใช้ข้อมูลจริง) → <prefix>-home.png ฯลฯ

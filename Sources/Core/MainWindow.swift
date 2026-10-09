@@ -54,6 +54,7 @@ final class HubModel: ObservableObject {
     let checkup = CheckupModel()
     let overlay: OverlayModel
     var onDemo: () -> Void = {}
+    var onGuide: () -> Void = {}
     private var observer: NSObjectProtocol?
 
     init(settings: SettingsModel, overlay: OverlayModel) {
@@ -601,7 +602,7 @@ private struct HomePage: View {
 }
 
 /// ปุ่มคีย์บอร์ดใหญ่บน Home — ยุบลงตอนกำลังฟัง
-private struct BigKeycap: View {
+struct BigKeycap: View {
     let combo: KeyCombo?
     let pressed: Bool
 

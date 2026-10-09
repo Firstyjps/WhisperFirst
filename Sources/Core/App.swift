@@ -11,6 +11,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     private var overlayPanel: OverlayPanel!
     private var hubWindow: NSWindow?
     private var hub: HubModel?
+    private var guideWindow: NSWindow?
+    private var guide: OnboardingModel?
     private var trustTimer: Timer?
     private var wasTrusted = false
 
@@ -26,9 +28,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         controller.start()
 
         DispatchQueue.global(qos: .utility).async { History.prune() }   // ลบประวัติเกินระยะที่ตั้งไว้
-        AVCaptureDevice.requestAccess(for: .audio) { ok in if !ok { Log.write("ไม่ได้สิทธิ์ไมค์") } }
+        // ติดตั้งใหม่ → ไกด์เป็นคนขอสิทธิ์ทีละขั้น (ไม่เด้ง dialog ระบบใส่ตั้งแต่เปิดแอป)
+        let firstRun = !Store.config.onboarded
+        if !firstRun { AVCaptureDevice.requestAccess(for: .audio) { ok in if !ok { Log.write("ไม่ได้สิทธิ์ไมค์") } } }
         wasTrusted = AX.trusted
-        if !wasTrusted { AX.prompt() }
+        if !wasTrusted && !firstRun { AX.prompt() }
         // ได้สิทธิ์ Accessibility ระหว่างที่แอปเปิดอยู่ → ติดตั้งตัวฟังปุ่มใหม่ให้ใช้ได้ทันที
         trustTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
@@ -45,7 +49,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                 }
             }
         }
-        if Keys.gemini == nil { showSettings() }
+        if firstRun { showGuide() } else if Keys.gemini == nil { showSettings() }
         // open -a WhisperFirst --args --login-item-on → ลงทะเบียนเปิดตอนเข้าสู่ระบบ (เหมือนกดในเมนู)
         if CommandLine.arguments.contains("--login-item-on"), SMAppService.mainApp.status != .enabled {
             do { try SMAppService.mainApp.register() } catch { Log.write("login item: \(error.localizedDescription)") }
@@ -108,6 +112,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         let login = item("Launch at Login", #selector(toggleLogin))
         login.state = SMAppService.mainApp.status == .enabled ? .on : .off
         menu.addItem(login)
+        menu.addItem(item("Welcome Guide…", #selector(openGuide)))
         menu.addItem(item("Show Data Folder", #selector(openFolder)))
         menu.addItem(.separator())
         menu.addItem(item("Quit WhisperFirst", #selector(quit)))
@@ -129,6 +134,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     @objc private func undoLearned() { controller.learner.undoLast() }
     @objc private func openSettings() { showSettings() }
     @objc private func openHub() { showHub(.home) }
+    @objc private func openGuide() { showGuide() }
     @objc private func openFolder() { NSWorkspace.shared.open(Paths.support) }
     @objc private func quit() { NSApp.terminate(nil) }
 
@@ -150,6 +156,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             vm.shortcuts.onChange = { [weak self] in self?.controller.updateHint() }
             let h = HubModel(settings: vm, overlay: controller.overlay)
             h.onDemo = { [weak self] in self?.controller.demoIsland() }
+            h.onGuide = { [weak self] in self?.showGuide() }
             hub = h
             let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1040, height: 720),
                              styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
@@ -172,14 +179,51 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         hubWindow?.makeKeyAndOrderFront(nil)
     }
 
+    /// ไกด์ใช้งาน — หน้าต่างแยกขนาดคงที่ · ปิด/ข้าม/จบ = ถือว่าผ่านแล้ว (เปิดซ้ำได้จากเมนูหรือ Help)
+    func showGuide() {
+        if guideWindow == nil {
+            let g = OnboardingModel(shortcuts: ShortcutsModel(engine: controller.shortcuts), overlay: controller.overlay)
+            g.onFinish = { [weak self] in self?.guideWindow?.close() }
+            guide = g
+            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 720, height: 640),
+                             styleMask: [.titled, .closable, .fullSizeContentView], backing: .buffered, defer: false)
+            w.title = "Welcome to WhisperFirst"
+            w.titleVisibility = .hidden
+            w.titlebarAppearsTransparent = true
+            w.appearance = NSAppearance(named: .aqua)
+            w.backgroundColor = NSColor(red: 0.984, green: 0.976, blue: 0.965, alpha: 1)
+            w.isReleasedWhenClosed = false
+            w.delegate = self
+            w.contentView = NSHostingView(rootView: OnboardingView(m: g))
+            w.center()
+            guideWindow = w
+        }
+        NSApp.setActivationPolicy(.regular)
+        NSApp.activate(ignoringOtherApps: true)
+        guideWindow?.makeKeyAndOrderFront(nil)
+    }
+
+    private func guideClosed() {
+        guide?.stop()
+        guide = nil
+        guideWindow = nil
+        let first = !Store.config.onboarded
+        if first { Store.update { $0.onboarded = true } }
+        hub?.settings.geminiKey = Keys.gemini ?? ""
+        // ครั้งแรก → พาเข้าหน้าหลักต่อ (ยังไม่มี key → หน้า Settings) · เปิดซ้ำทีหลัง → กลับไปอยู่ menu bar
+        if first { DispatchQueue.main.async { self.showHub(Keys.gemini == nil ? .settings : .home) } }
+        else if hubWindow?.isVisible != true { DispatchQueue.main.async { NSApp.setActivationPolicy(.accessory) } }
+    }
+
     func windowDidResignKey(_ n: Notification) {
         if (n.object as? NSWindow) === hubWindow { hub?.settings.shortcuts.cancelRecording() }
     }
 
     func windowWillClose(_ n: Notification) {
+        if (n.object as? NSWindow) === guideWindow { guideClosed(); return }
         guard (n.object as? NSWindow) === hubWindow else { return }
         hub?.settings.shortcuts.cancelRecording()
-        DispatchQueue.main.async { NSApp.setActivationPolicy(.accessory) }
+        if guideWindow?.isVisible != true { DispatchQueue.main.async { NSApp.setActivationPolicy(.accessory) } }
     }
 
     /// ปิดแอประหว่างพูด → คืนเสียงลำโพงก่อน

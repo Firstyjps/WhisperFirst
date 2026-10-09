@@ -53,6 +53,8 @@ final class Controller {
         shortcuts.start()
         recorder.voiceProcessing = Store.config.noiseReduction
         recorder.prewarm()   // เปิดตัวลดเสียงรบกวนไว้ก่อน (~0.9 วิ) — กดพูดแล้วไมค์เปิดทันที
+        // ลำโพงที่ต้องหยุดเพลงแทน → ขอสิทธิ์ฟังเสียงแอปตอนนี้ (ไม่ให้ dialog เด้งกลางประโยค) · ติดตั้งใหม่ปล่อยให้ไกด์ทำงานก่อน
+        if Store.config.onboarded, Store.config.muteWhileTalking != .off, AudioDucker.pausesInsteadOfLowering { PlaybackProbe.requestPermission() }
         recorder.onLevel = { [weak self] level in
             MainActor.assumeIsolated {
                 guard let self, self.state == .recording, self.committed else { return }
@@ -231,7 +233,8 @@ final class Controller {
                 self.ducker.duck(mode)
             }
             duckWork = w
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: w)
+            // หยุดเพลง (ลำโพง HDMI/DisplayPort) ทำได้ทันที — ยิ่งเร็ว เสียงเพลงยิ่งไม่เพี้ยนช่วงตัวลดเสียงรบกวนไมค์เริ่มทำงาน
+            DispatchQueue.main.asyncAfter(deadline: .now() + (AudioDucker.pausesInsteadOfLowering ? 0 : 0.25), execute: w)
         }
         if !Transcriber.useLocal { transcriber.prewarm() }
         if let key = Keys.gemini { live?.start(key: key) }
