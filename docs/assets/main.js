@@ -4,9 +4,9 @@
 
   // ── ปล่อยเวอร์ชันใหม่: แก้ตรงนี้ที่เดียว ──
   const RELEASE = {
-    version: '1.0',
+    version: '1.0.1',
     size: '1.5 MB',
-    sha256: '587eb6d8f2b1b273fb1dee701fe122ec7beb20344d3bb095e20662fd8ce18fe2',
+    sha256: 'b2880313070abe7791dafc6fc773755f2185d90f50f5836029cce280fd1abfac',
     url: 'download/WhisperFirst.dmg',
   };
 
