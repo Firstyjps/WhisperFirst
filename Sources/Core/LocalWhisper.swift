@@ -55,9 +55,12 @@ final class LocalWhisper: @unchecked Sendable {
     private var ready = false
     private var starting: Task<Bool, Never>?
     private var idleTimer: DispatchWorkItem?
+    /// stdout/stderr ท้ายสุดของ server (~4 KB) — ไว้ลง log ตอนเปิดไม่ขึ้น
+    private var tail = Data()
     private static let pidKey = "wf.localWhisper.pid"
+    private static let startKey = "wf.localWhisper.start"
 
-    private init() { killOrphan() }
+    private init() {}
 
     static var serverPath: String? { serverPaths.first { FileManager.default.isExecutableFile(atPath: $0) } }
 
@@ -84,6 +87,27 @@ final class LocalWhisper: @unchecked Sendable {
     }
 
     func transcribe(_ input: DictationInput) async throws -> String {
+        // ครอบเวลาทั้งหมด (timeoutInterval ของ URLRequest นับแค่ช่วงเงียบ ไม่ใช่ทั้งคำขอ) → ไม่ค้าง "Polishing" เป็นนาที
+        let limit = 60 + input.seconds * 1.5
+        do {
+            return try await withThrowingTaskGroup(of: String.self) { g in
+                g.addTask { try await self.request(input) }
+                g.addTask {
+                    try await Task.sleep(nanoseconds: UInt64(limit * 1_000_000_000))
+                    throw WFError("ถอดเสียงในเครื่องนานเกิน \(Int(limit)) วิ")
+                }
+                defer { g.cancelAll() }
+                return try await g.next()!
+            }
+        } catch {
+            // server ยังเปิดอยู่แต่ไม่ตอบ/ตอบผิด → ปิดทิ้ง ครั้งหน้าเปิดใหม่ (ไม่ใช้ตัวที่ค้างต่อ)
+            // ผู้ใช้กด Esc ≠ server เสีย
+            if !(error is CancellationError), !Task.isCancelled { Log.write("local: ถอดไม่สำเร็จ → รีสตาร์ต server ครั้งหน้า"); stop() }
+            throw error
+        }
+    }
+
+    private func request(_ input: DictationInput) async throws -> String {
         guard await ensureRunning() else { throw WFError("ถอดเสียงในเครื่องไม่ได้ (\(Self.status))") }
         let p = lock.withLock { port }
         let boundary = "wf-\(UUID().uuidString)"
@@ -118,9 +142,22 @@ final class LocalWhisper: @unchecked Sendable {
     static let hallucinations = ["ขอบคุณที่รับชม", "ขอบคุณสําหรับการรับชม", "ขอบคุณสำหรับการรับชม", "ฝากกดไลค์", "กดติดตาม", "ซับไตเติ้ล", "โปรดติดตามตอนต่อไป",
                                  "thank you for watching", "thanks for watching", "subtitles by"]
 
+    /// เป็นแค่ประโยคที่ Whisper แต่งเอง (ไม่มีคำพูดจริงปน) — ข้อความที่ "มีคำ" กดติดตาม/ซับไตเติ้ล อยู่ในประโยคจริงไม่ถูกตัด
+    static func isHallucination(_ raw: String) -> Bool {
+        let drop = CharacterSet.whitespacesAndNewlines.union(.punctuationCharacters).union(.symbols)
+        func squash(_ s: String) -> String { String(s.lowercased().unicodeScalars.filter { !drop.contains($0) }) }
+        var rest = squash(raw)
+        guard !rest.isEmpty else { return true }
+        for h in hallucinations.map(squash).sorted(by: { $0.count > $1.count }) { rest = rest.replacingOccurrences(of: h, with: "") }
+        for p in ["ครับ", "ค่ะ", "คะ", "นะ", "และ"] { rest = rest.replacingOccurrences(of: p, with: "") }
+        return rest.isEmpty
+    }
+
     static func polish(_ raw: String) -> String {
-        let low = raw.lowercased().trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
-        if low.isEmpty || (low.count < 40 && hallucinations.contains { low.contains($0) }) { return "" }
+        if isHallucination(raw) {
+            if !raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { Log.write("local: ตัดประโยคที่ Whisper แต่งเอง (\(raw.count) ตัว)") }
+            return ""
+        }
         var t = Clean.fillers(raw)
         for (from, to) in Prompt.dictionaryEntries().hints { t = Clean.replace(t, from, to, caseInsensitive: true) }
         // Whisper บางทีใส่ "..." / ซ้ำบรรทัดตอนเงียบท้าย
@@ -167,21 +204,32 @@ final class LocalWhisper: @unchecked Sendable {
     private func start() async -> Bool {
         guard let exe = Self.serverPath, let model = Self.modelURL else { return false }
         stop()
-        let p = Self.freePort()
+        // หาพอร์ตว่างไม่ได้ → ไม่เดาพอร์ตตายตัว (อาจเป็นโปรแกรมอื่นที่ฟังอยู่ แล้วเสียงผู้ใช้ไปถึงมัน)
+        guard let p = Self.freePort() else { Log.write("local: หาพอร์ตว่างไม่ได้ → ไม่เปิด server"); return false }
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: exe)
         var args = ["-m", model.path, "-l", "th", "--host", "127.0.0.1", "--port", "\(p)",
                     "-t", "\(max(4, min(6, ProcessInfo.processInfo.activeProcessorCount - 2)))", "-nt"]
         if let vad = Self.vadModel { args += ["--vad", "-vm", vad.path] }   // ช่วงเงียบไม่ถูกถอด (กันแต่งประโยค)
         proc.arguments = args
-        proc.standardOutput = FileHandle.nullDevice
-        proc.standardError = FileHandle.nullDevice
+        // เก็บเฉพาะท้ายสุดในหน่วยความจำ (ไม่เขียนไฟล์ — server พิมพ์ทุกคำขอ) ไว้บอกสาเหตุตอนเปิดไม่ขึ้น
+        let pipe = Pipe()
+        proc.standardOutput = pipe
+        proc.standardError = pipe
+        pipe.fileHandleForReading.readabilityHandler = { [weak self] h in
+            let d = h.availableData
+            guard let self, !d.isEmpty else { h.readabilityHandler = nil; return }
+            self.lock.withLock { self.tail.append(d); if self.tail.count > 4096 { self.tail = self.tail.suffix(4096) } }
+        }
+        lock.withLock { tail = Data() }
         let t0 = Date()
         do { try proc.run() } catch {
+            pipe.fileHandleForReading.readabilityHandler = nil
             Log.write("local: เปิด whisper-server ไม่ได้ \(error.localizedDescription)")
             return false
         }
         UserDefaults.standard.set(Int(proc.processIdentifier), forKey: Self.pidKey)
+        if let st = Self.startTime(proc.processIdentifier) { UserDefaults.standard.set(st, forKey: Self.startKey) }
         lock.withLock { process = proc; port = p; ready = false }
         // รอโหลดโมเดล (ปกติ ~1–3 วิ)
         for _ in 0..<240 {   // ≤60 วิ (เครื่องโหลดหนักอาจโหลดโมเดลช้า)
@@ -193,7 +241,9 @@ final class LocalWhisper: @unchecked Sendable {
             }
             try? await Task.sleep(nanoseconds: 250_000_000)
         }
-        Log.write("local: whisper-server ไม่พร้อม")
+        let last = lock.withLock { String(decoding: tail.suffix(600), as: UTF8.self) }
+            .split(separator: "\n").suffix(4).joined(separator: " | ")
+        Log.write("local: whisper-server ไม่พร้อม" + (proc.isRunning ? "" : " (ปิดเอง status \(proc.terminationStatus))") + (last.isEmpty ? "" : " · \(last)"))
         stop()
         return false
     }
@@ -205,6 +255,7 @@ final class LocalWhisper: @unchecked Sendable {
             process = nil; ready = false
         }
         UserDefaults.standard.removeObject(forKey: Self.pidKey)
+        UserDefaults.standard.removeObject(forKey: Self.startKey)
     }
 
     /// ไม่ได้ใช้ 10 นาที → ปิด (คืน RAM ~3 GB)
@@ -221,16 +272,27 @@ final class LocalWhisper: @unchecked Sendable {
         }
     }
 
-    /// แอปปิดกะทันหันครั้งก่อน → server ค้างกิน RAM อยู่ → ปิดทิ้ง (ตรวจว่าเป็น whisper-server จริงก่อน)
-    private func killOrphan() {
-        let pid = UserDefaults.standard.integer(forKey: Self.pidKey)
+    /// แอปปิดกะทันหันครั้งก่อน → server ค้างกิน RAM อยู่ → ปิดทิ้ง (เรียกตอนเปิดแอป)
+    /// ตรวจทั้ง path และเวลาเริ่มของ process — หลังรีบูต pid เดิมอาจเป็นของ whisper-server ตัวอื่นที่ผู้ใช้รันเอง
+    static func cleanupOrphanAtLaunch() {
+        let d = UserDefaults.standard
+        let pid = d.integer(forKey: pidKey), saved = d.integer(forKey: startKey)
         guard pid > 0 else { return }
-        UserDefaults.standard.removeObject(forKey: Self.pidKey)
+        d.removeObject(forKey: pidKey); d.removeObject(forKey: startKey)
         var buf = [CChar](repeating: 0, count: 4096)
         guard proc_pidpath(pid_t(pid), &buf, UInt32(buf.count)) > 0,
-              String(cString: buf).hasSuffix("/whisper-server") else { return }
+              String(cString: buf).hasSuffix("/whisper-server"),
+              saved > 0, startTime(pid_t(pid)) == saved else { return }
         kill(pid_t(pid), SIGTERM)
         Log.write("local: ปิด whisper-server ที่ค้างจากครั้งก่อน")
+    }
+
+    /// เวลาเริ่มของ process (วินาที epoch) — nil = ไม่มี process นี้
+    private static func startTime(_ pid: pid_t) -> Int? {
+        var info = proc_bsdinfo()
+        let size = Int32(MemoryLayout<proc_bsdinfo>.size)
+        guard proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, size) == size else { return nil }
+        return Int(info.pbi_start_tvsec)
     }
 
     private static func ping(_ port: Int) async -> Bool {
@@ -240,7 +302,7 @@ final class LocalWhisper: @unchecked Sendable {
         return (resp as? HTTPURLResponse)?.statusCode == 200
     }
 
-    private static func freePort() -> Int {
+    private static func freePort() -> Int? {
         let s = socket(AF_INET, SOCK_STREAM, 0)
         defer { close(s) }
         var addr = sockaddr_in()
@@ -251,6 +313,6 @@ final class LocalWhisper: @unchecked Sendable {
         let ok = withUnsafeMutablePointer(to: &addr) { p in
             p.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(s, $0, len) == 0 && getsockname(s, $0, &len) == 0 }
         }
-        return ok ? Int(UInt16(bigEndian: addr.sin_port)) : 18178
+        return ok ? Int(UInt16(bigEndian: addr.sin_port)) : nil
     }
 }

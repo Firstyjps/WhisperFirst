@@ -9,9 +9,21 @@ struct Snippet: Codable, Identifiable, Equatable {
 }
 
 enum Snippets {
+    private static var backedUp = false
+
     static func all() -> [Snippet] {
         guard let d = try? Data(contentsOf: Paths.snippets) else { return [] }
-        return (try? JSONDecoder().decode([Snippet].self, from: d)) ?? []
+        do { return try JSONDecoder().decode([Snippet].self, from: d) } catch {
+            // ไฟล์เสีย/แก้มือผิด → เก็บสำเนาไว้ก่อน (บันทึกครั้งถัดไปจะเขียนทับ ไม่ให้วลีเดิมหายถาวร)
+            if !backedUp {
+                backedUp = true
+                let stamp = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "")
+                let bak = Paths.support.appendingPathComponent("snippets.json.broken-\(stamp)")
+                try? FileManager.default.copyItem(at: Paths.snippets, to: bak)
+                Log.write("snippets: อ่าน snippets.json ไม่ได้ → เก็บสำเนาไว้ที่ \(bak.lastPathComponent)")
+            }
+            return []
+        }
     }
 
     static func save(_ list: [Snippet]) {

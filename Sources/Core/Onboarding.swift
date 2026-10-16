@@ -73,8 +73,15 @@ final class OnboardingModel: ObservableObject {
     }
 
     func saveKey() {
-        Keys.save(gemini: geminiKey, elevenLabs: Keys.savedElevenLabs)
-        keySaved = Keys.gemini != nil
+        keySaved = Keys.save(gemini: geminiKey, elevenLabs: Keys.savedElevenLabs) && Keys.gemini != nil
+    }
+
+    /// ข้าม/ปิดไกด์ทั้งที่พิมพ์ key ไว้แล้ว → บันทึกให้ (ช่องว่าง = ไม่แตะ key เดิม)
+    func keepTypedKey() {
+        let k = geminiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !k.isEmpty, k != (Keys.gemini ?? "") else { return }
+        saveKey()
+        Log.write("guide: ปิดไกด์ก่อนกดถัดไป → บันทึก key ที่พิมพ์ไว้")
     }
 
     func setLoginItem(_ on: Bool) {

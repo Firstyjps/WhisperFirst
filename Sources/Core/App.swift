@@ -15,6 +15,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     private var guide: OnboardingModel?
     private var trustTimer: Timer?
     private var wasTrusted = false
+    private var tapRetryLogged = false
 
     func applicationDidFinishLaunching(_ n: Notification) {
         // ห้ามเปิดซ้อน 2 ตัว (ปุ่มลัดจะทำงานซ้ำ) · ตัวที่เปิดทีหลังคือเวอร์ชันที่ผู้ใช้เพิ่งลากมาทับ → ปิดตัวเก่าแล้วทำงานแทน
@@ -29,6 +30,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             if others.contains(where: { !$0.isTerminated }) { Log.write("ตัวเก่าไม่ยอมปิด → ปิดตัวนี้แทน"); NSApp.terminate(nil); return }
         }
         Paths.seedFromBundle()
+        LocalWhisper.cleanupOrphanAtLaunch()   // ครั้งก่อนแอปล่ม → whisper-server (~3 GB) ค้างอยู่ → ปิดตั้งแต่เปิดแอป ไม่รอใช้ครั้งถัดไป
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         let menu = NSMenu()
         menu.delegate = self
@@ -52,8 +54,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                 let now = AX.trusted
                 if now != self.wasTrusted {
                     self.wasTrusted = now
-                    if now { self.controller.shortcuts.start(); self.controller.overlay.flash("Ready — hold \(Store.config.pushToTalkLabel) and speak", seconds: 3) }
-                    else {
+                    if now {
+                        // สร้าง event tap ไม่สำเร็จ → ยังไม่พร้อมจริง: ไม่ขึ้น Ready และลองใหม่รอบถัดไป
+                        guard self.controller.shortcuts.start() else {
+                            self.wasTrusted = false
+                            if !self.tapRetryLogged { self.tapRetryLogged = true; Log.write("ได้สิทธิ์ Accessibility แล้วแต่ดักปุ่มไม่ได้ → ลองใหม่ทุก 2 วิ") }
+                            return
+                        }
+                        self.tapRetryLogged = false
+                        self.controller.overlay.flash("Ready — hold \(Store.config.pushToTalkLabel) and speak", seconds: 3)
+                    } else {
                         self.controller.shortcuts.stop()
                         if self.controller.state == .recording { self.controller.cancel(silent: false) }   // ปล่อยปุ่มไม่ถูกตรวจจับแล้ว → อย่าให้ไมค์ค้าง
                         Log.write("สิทธิ์ Accessibility หลุด → หยุดดักปุ่ม") }   // ไม่ค้าง tap ที่ใช้ไม่ได้
@@ -68,6 +78,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         }
         Log.write("login item: \(SMAppService.mainApp.status == .enabled ? "เปิด" : "ปิด (status \(SMAppService.mainApp.status.rawValue))")")
         Log.write("start (ax=\(wasTrusted))")
+        // เปิดจากใน DMG / ตำแหน่งชั่วคราวของ Gatekeeper → Launch at Login จะจำ path ที่หายไป
+        let path = Bundle.main.bundlePath
+        if path.hasPrefix("/Volumes/") || path.contains("/AppTranslocation/") {
+            Log.write("รันจากตำแหน่งชั่วคราว (\(path.hasPrefix("/Volumes/") ? "DMG" : "translocated"))")
+            controller.overlay.flash("Drag WhisperFirst into Applications, then open it from there", seconds: 6)
+        }
     }
 
     private func updateIcon() {
@@ -217,6 +233,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
 
     private func guideClosed() {
         let askedSystemAudio = guide?.systemAudioAsked ?? false
+        guide?.keepTypedKey()   // กดข้าม/ปิดหน้าต่างหลังพิมพ์ key → ไม่ทิ้ง key ที่พิมพ์ไว้
         guide?.stop()
         guide = nil
         guideWindow = nil
@@ -262,6 +279,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
 
 /// จุดเข้าของแอป — Sources/Launcher เรียกฟังก์ชันนี้
 public func whisperfirstMain() {
+    // NSException ที่ไม่มีใครจับ → เขียนลง log ทันที (log ปกติเป็น async จะไม่ทันก่อนแอปปิด)
+    NSSetUncaughtExceptionHandler { e in Log.writeNow("crash: \(e.name.rawValue) — \(e.reason ?? "-")") }
     if CommandLine.arguments.contains("--mic-bench") { MicBench.run(); exit(0) }
     MainActor.assumeIsolated {
         let app = NSApplication.shared

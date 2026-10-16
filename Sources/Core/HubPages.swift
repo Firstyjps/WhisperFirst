@@ -24,6 +24,9 @@ struct DictionaryPage: View {
 
     @ViewBuilder private var visual: some View {
         addBar
+        if let err = d.addError {
+            Text(err).font(.system(size: 12.5)).foregroundStyle(.red).padding(.leading, 18)
+        }
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text("Your words").font(Theme.rounded(16, .semibold))
@@ -95,6 +98,7 @@ struct DictionaryPage: View {
             Image(systemName: "plus").font(.system(size: 13, weight: .medium)).foregroundStyle(Theme.faint)
             TextField("Add a name, a brand or a word — e.g. a friend's name", text: $d.newWord)
                 .textFieldStyle(.plain).font(.system(size: 14)).onSubmit { d.add() }
+                .onChange(of: d.newWord) { d.addError = nil }
             Button("Add") { d.add() }.buttonStyle(PrimaryButtonStyle(enabled: !empty)).disabled(empty)
         }
         .padding(.leading, 18).padding(.trailing, 6).frame(height: 46)

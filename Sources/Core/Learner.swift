@@ -80,6 +80,8 @@ final class Learner {
         var current: String
         var changedAt: Date
         let startedAt: Date
+        /// อ่านช่องไม่ได้ติดกันกี่ครั้ง (แอปตอบช้าชั่วคราว ≠ ช่องปิดไป)
+        var misses = 0
     }
     private var watch: Watch?
     private var timer: Timer?
@@ -166,8 +168,15 @@ final class Learner {
     private func process(_ value: String?) {
         guard var w = watch else { return }
         let now = Date()
-        guard let value,
-              let region = Self.region(in: value, prefix: w.prefix, suffix: w.suffix, approx: (w.inserted as NSString).length) else {
+        guard let value else {
+            // อ่านไม่ได้ครั้งเดียวอาจแค่แอปตอบช้า → รอ 3 ครั้งติด (~4.5 วิ) ก่อนเลิก
+            w.misses += 1
+            watch = w
+            if w.misses >= 3 { flush() }
+            return
+        }
+        w.misses = 0
+        guard let region = Self.region(in: value, prefix: w.prefix, suffix: w.suffix, approx: (w.inserted as NSString).length) else {
             flush()   // ช่องปิดไป/ข้อความรอบๆ เปลี่ยนมาก → ใช้สิ่งที่เห็นล่าสุด
             return
         }
@@ -184,6 +193,7 @@ final class Learner {
         guard let w = watch else { return }
         watch = nil
         guard !Store.config.privateMode else { return }   // การตัดสินคำใช้ Gemini → Private mode ไม่ส่ง
+        guard Store.config.learnFromEdits else { return }   // ปิดระหว่างที่ติดตามอยู่ → ไม่เรียนรู้
         guard w.current != w.inserted else { return }
         // ลบทั้งช่อง (เช่นกดส่งข้อความแล้วช่องว่าง) / เขียนใหม่เกือบหมด → ไม่ใช่การแก้คำ
         let cur = w.current.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -196,6 +206,7 @@ final class Learner {
         let current = w.current
         Task { [weak self] in
             for h in hunks {
+                guard Store.config.learnFromEdits, !Store.config.privateMode else { return }
                 guard let self, let d = await self.judge(h, context: Self.context(of: h.new, in: current)), d.learn else { continue }
                 self.add(word: d.word, heard: d.heard)
             }
@@ -259,21 +270,24 @@ final class Learner {
         if !words.contains(word) { lines.append(word) }
         if !heard.isEmpty, heard != word, !hints.contains(where: { $0.0 == heard && $0.1 == word }) { lines.append("\(heard) ~> \(word)") }
         guard !lines.isEmpty else { return }
-        var s = (try? String(contentsOf: Paths.dictionary, encoding: .utf8)) ?? ""
+        // อ่านไฟล์เดิมไม่ได้ (encoding เสีย) → ห้ามเขียนทับ ไม่งั้นพจนานุกรมเหลือแต่คำใหม่
+        guard var s = DictionaryFile.read() else {
+            Log.write("learn: อ่าน dictionary.txt ไม่ได้ → ไม่เพิ่มคำ (ไฟล์เดิมไม่ถูกแตะ)"); return
+        }
         if !s.contains(Self.header) { s += (s.isEmpty || s.hasSuffix("\n") ? "" : "\n") + "\n" + Self.header + "\n" }
         if !s.hasSuffix("\n") { s += "\n" }
         s += lines.joined(separator: "\n") + "\n"
-        Files.writeSecure(Data(s.utf8), to: Paths.dictionary)
+        guard DictionaryFile.write(s) else { return }
         lastLearned = Learned(word: word, lines: lines)
         Log.write("learn: เพิ่ม \(lines.count) บรรทัด")
         onLearned?(word)
     }
 
     func undoLast() {
-        guard let l = lastLearned, let s = try? String(contentsOf: Paths.dictionary, encoding: .utf8) else { return }
+        guard let l = lastLearned, let s = DictionaryFile.read() else { return }
         var out = s.components(separatedBy: "\n")
         for line in l.lines { if let i = out.lastIndex(of: line) { out.remove(at: i) } }
-        Files.writeSecure(Data(out.joined(separator: "\n").utf8), to: Paths.dictionary)
+        guard DictionaryFile.write(out.joined(separator: "\n")) else { return }
         lastLearned = nil
     }
 }

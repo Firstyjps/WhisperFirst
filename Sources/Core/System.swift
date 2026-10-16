@@ -36,12 +36,11 @@ enum AX {
     static func textBeforeCursor(limit: Int = 400) -> String? {
         guard let el = focusedElement(), !isSecure(el), let value = string(el, kAXValueAttribute) else { return nil }
         let ns = value as NSString
-        var range = CFRange(location: ns.length, length: 0)
+        // ไม่รู้ตำแหน่งเคอร์เซอร์ → ไม่เดาเอาท้ายเอกสาร (อาจเป็นข้อความคนละส่วนกับที่กำลังพิมพ์)
+        var range = CFRange()
         var r: CFTypeRef?
-        if AXUIElementCopyAttributeValue(el, kAXSelectedTextRangeAttribute as CFString, &r) == .success, let r,
-           CFGetTypeID(r) == AXValueGetTypeID() {
-            AXValueGetValue(r as! AXValue, .cfRange, &range)
-        }
+        guard AXUIElementCopyAttributeValue(el, kAXSelectedTextRangeAttribute as CFString, &r) == .success, let r,
+              CFGetTypeID(r) == AXValueGetTypeID(), AXValueGetValue(r as! AXValue, .cfRange, &range) else { return nil }
         let end = min(max(range.location, 0), ns.length)
         let start = max(0, end - limit)
         return ns.substring(with: NSRange(location: start, length: end - start))
@@ -123,6 +122,7 @@ enum Inserter {
         let pb = NSPasteboard.general
         pb.clearContents()
         pb.setString(text, forType: .string)
+        pb.setString("", forType: transient)
     }
 
     /// ข้อความที่เลือกอยู่: ลอง Accessibility ก่อน · อ่านช่องได้แต่ไม่ได้เลือกอะไร = ไม่มี (ไม่ ⌘C — VS Code จะก๊อปทั้งบรรทัด)
@@ -204,7 +204,9 @@ enum History {
         guard var line = try? JSONEncoder().encode(e) else { return }
         line.append(0x0A)
         if let h = try? FileHandle(forWritingTo: Paths.history) {
-            h.seekToEndOfFile(); h.write(line); try? h.close()
+            defer { try? h.close() }
+            // API แบบ throw: ดิสก์เต็ม/ไฟล์หาย → ทิ้งบรรทัดนี้ ไม่ทำแอปล่ม (แบบเก่า seekToEndOfFile/write โยน NSException)
+            do { try h.seekToEnd(); try h.write(contentsOf: line) } catch { Log.write("history: บันทึกไม่ได้ (\(error.localizedDescription))") }
         } else {
             FileManager.default.createFile(atPath: Paths.history.path, contents: line, attributes: [.posixPermissions: 0o600])
         }
@@ -248,12 +250,24 @@ enum History {
 
 /// เขียนไฟล์ข้อมูลส่วนตัวด้วยสิทธิ์ 600 ตั้งแต่แรก (ไม่มีช่วงที่ไฟล์อ่านได้ทุกคน) แล้วสลับแทนที่แบบ atomic
 enum Files {
-    static func writeSecure(_ data: Data, to url: URL) {
+    /// คืน false ถ้าเขียนไม่สำเร็จ (ไฟล์เดิมไม่ถูกแตะ และไม่ทิ้งไฟล์ชั่วคราวที่มีข้อมูลลับไว้)
+    @discardableResult
+    static func writeSecure(_ data: Data, to url: URL) -> Bool {
         let fm = FileManager.default
         try? fm.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         let tmp = url.deletingLastPathComponent().appendingPathComponent(".\(url.lastPathComponent).\(UUID().uuidString.prefix(8))")
-        guard fm.createFile(atPath: tmp.path, contents: data, attributes: [.posixPermissions: 0o600]) else { return }
-        if fm.fileExists(atPath: url.path) { _ = try? fm.replaceItemAt(url, withItemAt: tmp) } else { try? fm.moveItem(at: tmp, to: url) }
+        guard fm.createFile(atPath: tmp.path, contents: data, attributes: [.posixPermissions: 0o600]) else {
+            Log.write("file: เขียน \(url.lastPathComponent) ไม่ได้")
+            return false
+        }
+        do {
+            if fm.fileExists(atPath: url.path) { _ = try fm.replaceItemAt(url, withItemAt: tmp) } else { try fm.moveItem(at: tmp, to: url) }
+        } catch {
+            try? fm.removeItem(at: tmp)
+            Log.write("file: บันทึก \(url.lastPathComponent) ไม่ได้ (\(error.localizedDescription))")
+            return false
+        }
         try? fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+        return true
     }
 }

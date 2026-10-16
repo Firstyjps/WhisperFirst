@@ -70,8 +70,11 @@ final class SettingsModel: ObservableObject {
 
     func saveAdvanced() {
         let list = models.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
-        if !list.isEmpty { Store.update { $0.models = list } }
-        Keys.save(gemini: geminiKey, elevenLabs: elevenKey)
+        // ช่องว่าง = กลับไปใช้ค่าเริ่มต้น (แสดงให้เห็นในช่องด้วย ไม่ค้างรายการเก่าแบบเงียบๆ)
+        let use = list.isEmpty ? Config().models : list
+        Store.update { $0.models = use }
+        models = use.joined(separator: ", ")
+        guard Keys.save(gemini: geminiKey, elevenLabs: elevenKey) else { return }
         saved = true
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { self.saved = false }
     }
@@ -113,7 +116,7 @@ final class TextFileModel: ObservableObject {
             let added = disk.components(separatedBy: "\n").filter { !$0.isEmpty && !before.contains($0) && !mine.contains($0) }
             if !added.isEmpty { text += (text.isEmpty || text.hasSuffix("\n") ? "" : "\n") + added.joined(separator: "\n") + "\n" }
         }
-        Files.writeSecure(Data(text.utf8), to: url)
+        guard Files.writeSecure(Data(text.utf8), to: url) else { return }   // เขียนไม่ได้ → ไม่ขึ้นว่าบันทึกแล้ว (ยังแก้ค้างอยู่)
         loaded = text
         saved = true
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { self.saved = false }

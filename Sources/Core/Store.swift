@@ -26,7 +26,9 @@ enum Paths {
         try? fm.createDirectory(at: prompts, withIntermediateDirectories: true)
         for name in ["dictionary.txt", "about-me.md"] {
             let dst = support.appendingPathComponent(name), src = res.appendingPathComponent("defaults/\(name)")
-            if !fm.fileExists(atPath: dst.path) { try? fm.copyItem(at: src, to: dst) }
+            if !fm.fileExists(atPath: dst.path), (try? fm.copyItem(at: src, to: dst)) != nil {
+                try? fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: dst.path)   // ข้อมูลส่วนตัว อ่านได้เฉพาะผู้ใช้
+            }
         }
         for file in (try? fm.contentsOfDirectory(at: bundled, includingPropertiesForKeys: nil)) ?? [] where file.pathExtension == "md" {
             let dst = prompts.appendingPathComponent(file.lastPathComponent)
@@ -39,6 +41,26 @@ enum Paths {
                 try? new.write(to: orig, options: .atomic)
             }
         }
+    }
+}
+
+/// dictionary.txt — อ่าน/เขียนผ่านที่นี่ที่เดียว (สิทธิ์ 600, เขียนแบบ atomic)
+enum DictionaryFile {
+    /// ยังไม่มีไฟล์ = "" · มีไฟล์แต่อ่านไม่ได้ = nil (ห้ามเขียนทับ ไม่งั้นคำเดิมหายหมด)
+    static func read() -> String? {
+        guard FileManager.default.fileExists(atPath: Paths.dictionary.path) else { return "" }
+        return try? String(contentsOf: Paths.dictionary, encoding: .utf8)
+    }
+
+    @discardableResult
+    static func write(_ s: String) -> Bool { Files.writeSecure(Data(s.utf8), to: Paths.dictionary) }
+
+    /// ต่อท้ายบรรทัดใหม่ · false = อ่านหรือเขียนไม่ได้
+    static func append(_ lines: [String]) -> Bool {
+        guard var s = read() else { return false }
+        if !s.isEmpty && !s.hasSuffix("\n") { s += "\n" }
+        s += lines.map { $0 + "\n" }.joined()
+        return write(s)
     }
 }
 
@@ -214,10 +236,15 @@ enum Store {
     private(set) static var config: Config = load()
 
     private static func load() -> Config {
-        guard let data = try? Data(contentsOf: Paths.config), let c = try? JSONDecoder().decode(Config.self, from: data) else {
+        guard let data = try? Data(contentsOf: Paths.config) else { return Config() }
+        do { return try JSONDecoder().decode(Config.self, from: data) } catch {
+            // ไฟล์เสีย/แก้มือผิด → เก็บสำเนาไว้ก่อน save ครั้งถัดไปจะเขียนทับด้วยค่าเริ่มต้น
+            let stamp = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "")
+            let bak = Paths.support.appendingPathComponent("config.json.broken-\(stamp)")
+            try? FileManager.default.copyItem(at: Paths.config, to: bak)
+            Log.write("config: อ่าน config.json ไม่ได้ → ใช้ค่าเริ่มต้น (สำเนาเดิม: \(bak.lastPathComponent))")
             return Config()
         }
-        return c
     }
 
     static func update(_ change: (inout Config) -> Void) {
@@ -263,11 +290,12 @@ enum Keys {
                 ? nonEmpty(try? String(contentsOfFile: NSHomeDirectory() + "/.config/elevenlabs/api_key", encoding: .utf8)) : nil)
     }
 
-    static func save(gemini: String, elevenLabs: String) {
+    @discardableResult
+    static func save(gemini: String, elevenLabs: String) -> Bool {
         var lines = ["# WhisperFirst API keys (readable by this user only)"]
         if let g = nonEmpty(gemini) { lines.append("GEMINI_API_KEY=\(g)") }
         if let e = nonEmpty(elevenLabs) { lines.append("ELEVENLABS_API_KEY=\(e)") }
-        Files.writeSecure(Data((lines.joined(separator: "\n") + "\n").utf8), to: Paths.env)
+        return Files.writeSecure(Data((lines.joined(separator: "\n") + "\n").utf8), to: Paths.env)
     }
 
     /// ค่าที่ผู้ใช้ตั้งเองใน .env (ไม่รวม fallback) — ไว้แสดงในหน้าตั้งค่า
@@ -278,6 +306,13 @@ enum Keys {
 enum Log {
     private static let q = DispatchQueue(label: "wf.log")
     static var echo = false   // CLI พิมพ์ออกจอด้วย
+
+    /// เขียนทันทีแบบ synchronous (ใช้ตอนแอปกำลังล่ม)
+    static func writeNow(_ s: String) {
+        let line = Data("\(ISO8601DateFormatter().string(from: Date())) | \(s)\n".utf8)
+        guard let h = try? FileHandle(forWritingTo: Paths.log) else { return }
+        try? h.seekToEnd(); try? h.write(contentsOf: line); try? h.close()
+    }
 
     static func write(_ s: String) {
         if echo { FileHandle.standardError.write("· \(s)\n".data(using: .utf8)!) }
@@ -292,7 +327,8 @@ enum Log {
                 try? fm.moveItem(at: Paths.log, to: old)
             }
             if let h = try? FileHandle(forWritingTo: Paths.log) {
-                h.seekToEndOfFile(); h.write(line.data(using: .utf8)!); try? h.close()
+                defer { try? h.close() }
+                try? h.seekToEnd(); try? h.write(contentsOf: Data(line.utf8))   // แบบ throw: ดิสก์เต็มไม่ทำแอปล่ม
             } else {
                 fm.createFile(atPath: Paths.log.path, contents: line.data(using: .utf8), attributes: [.posixPermissions: 0o600])
             }

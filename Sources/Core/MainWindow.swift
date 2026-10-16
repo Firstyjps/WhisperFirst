@@ -209,11 +209,14 @@ final class DictionaryModel: ObservableObject {
     @Published var newWord = ""
     @Published var rawMode = false
     @Published var justAdded: String?
+    /// เพิ่มคำไม่ได้ → ข้อความแสดงใต้ช่อง
+    @Published var addError: String?
     let raw = TextFileModel(url: Paths.dictionary)
 
     func load() {
         let e = Prompt.dictionaryEntries()
-        words = e.words
+        var seen = Set<String>()
+        words = e.words.filter { seen.insert($0).inserted }   // คำซ้ำในไฟล์ → แสดงครั้งเดียว (id ของ ForEach ห้ามซ้ำ)
         fixes = e.fixes
         learned = e.hints
         raw.load()
@@ -222,19 +225,30 @@ final class DictionaryModel: ObservableObject {
     func add() {
         let w = newWord.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !w.isEmpty, !w.contains("\n") else { return }
-        var s = (try? String(contentsOf: Paths.dictionary, encoding: .utf8)) ?? ""
-        if !s.isEmpty && !s.hasSuffix("\n") { s += "\n" }
-        if !words.contains(w) { s += w + "\n" }
-        try? s.write(to: Paths.dictionary, atomically: true, encoding: .utf8)
+        if let err = Self.problem(w) { addError = err; return }
+        if !words.contains(w) {
+            guard DictionaryFile.append([w]) else { addError = "Couldn't save the dictionary — nothing changed"; return }
+        }
+        addError = nil
         newWord = ""
         load()
         justAdded = w
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { if self.justAdded == w { self.justAdded = nil } }
     }
 
+    /// บรรทัดที่ไฟล์จะอ่านผิดความหมาย (# = โน้ต, คู่ => / ~> ที่ข้างใดข้างหนึ่งว่าง)
+    nonisolated static func problem(_ w: String) -> String? {
+        if w.hasPrefix("#") { return "Lines starting with # are notes — remove the # to add a word" }
+        for sep in ["=>", "~>"] where w.contains(sep) {
+            let parts = w.components(separatedBy: sep).map { $0.trimmingCharacters(in: .whitespaces) }
+            if parts.count != 2 || parts.contains(where: \.isEmpty) { return "Write it as heard \(sep) correct" }
+        }
+        return nil
+    }
+
     /// ลบบรรทัด — เทียบแบบแยกคู่ (ทนช่องว่างที่ผู้ใช้พิมพ์เองในโหมดข้อความ เช่น "a=>b" / "a  =>  b")
     func remove(line: String) {
-        guard let s = try? String(contentsOf: Paths.dictionary, encoding: .utf8) else { return }
+        guard let s = DictionaryFile.read() else { return }
         var lines = s.components(separatedBy: "\n")
         let norm: (String) -> String = { l in
             var t = l.trimmingCharacters(in: .whitespaces)
@@ -245,8 +259,8 @@ final class DictionaryModel: ObservableObject {
             return t
         }
         let target = norm(line)
-        if let i = lines.firstIndex(where: { norm($0) == target }) { lines.remove(at: i) }
-        try? lines.joined(separator: "\n").write(to: Paths.dictionary, atomically: true, encoding: .utf8)
+        lines.removeAll { norm($0) == target }   // ลบทุกบรรทัดที่ซ้ำ (ไม่งั้นกดลบแล้วคำยังอยู่)
+        DictionaryFile.write(lines.joined(separator: "\n"))
         load()
     }
 }

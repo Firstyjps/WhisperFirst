@@ -178,7 +178,6 @@ final class Controller {
             overlay.flash(Store.config.privateMode ? "Command mode needs the cloud — Private mode is on" : "Command mode needs the internet")
             return
         }
-        if local { LocalWhisper.shared.prewarm() }   // โหลดโมเดลระหว่างพูด (~2 วิ)
         let app = NSWorkspace.shared.frontmostApplication
         target = (app?.localizedName ?? "", app?.bundleIdentifier ?? "")
         let s = DictationSession(transcriber: transcriber, appName: target.name, bundleID: target.bundle)
@@ -236,13 +235,16 @@ final class Controller {
             // หยุดเพลง (ลำโพง HDMI/DisplayPort) ทำได้ทันที — ยิ่งเร็ว เสียงเพลงยิ่งไม่เพี้ยนช่วงตัวลดเสียงรบกวนไมค์เริ่มทำงาน
             DispatchQueue.main.asyncAfter(deadline: .now() + (AudioDucker.pausesInsteadOfLowering ? 0 : 0.25), execute: w)
         }
-        if !Transcriber.useLocal { transcriber.prewarm() }
+        // โหลดโมเดลในเครื่องเฉพาะเมื่อกดค้างจริง (แตะสั้น/⌥+ตัวอักษร ไม่เปิด server ~3 GB) — ยังโหลดทันระหว่างพูด (~2 วิ)
+        if Transcriber.useLocal { LocalWhisper.shared.prewarm() } else { transcriber.prewarm() }
         if let key = Keys.gemini { live?.start(key: key) }
         // อ่านข้อความก่อนเคอร์เซอร์นอก main (AX อาจค้างได้ถึงวินาที) · ไม่อ่านใน terminal/ตัวจัดการรหัสผ่าน
         let pid = app?.processIdentifier
         let useContext = Store.config.useContext && !Self.noContextApps.contains(target.bundle)
+        // เปิด accessibility tree ของแอป Electron เฉพาะเมื่อต้องอ่านช่อง (บริบท / เรียนรู้คำ) — ปิดทั้งคู่ = ไม่แตะแอปนั้น
+        let needAX = useContext || (Store.config.learnFromEdits && !Store.config.privateMode)
         DispatchQueue.global(qos: .userInitiated).async {
-            if let pid { AX.enableManualAccessibility(pid: pid) }
+            if let pid, needAX { AX.enableManualAccessibility(pid: pid) }
             s.setBefore(useContext ? AX.textBeforeCursor() : nil)
         }
     }
@@ -286,7 +288,7 @@ final class Controller {
         task = Task { [weak self] in
             // อัดต่ออีกนิดหลังปล่อยปุ่ม กันท้ายประโยคขาด (บัฟเฟอร์สุดท้ายของไมค์)
             try? await Task.sleep(nanoseconds: 150_000_000)
-            guard let self, !Task.isCancelled else { return }
+            guard let self, !Task.isCancelled else { s.cancel(); return }   // Esc ช่วงนี้ → ปิด Live socket ด้วย
             self.recorder.stop()
             let seconds = s.seconds, peak = s.peakValue
             guard seconds >= 0.4, peak >= 0.008 else {
@@ -313,6 +315,7 @@ final class Controller {
                 self.task = nil
                 self.overlay.flash("No speech detected")
             } catch is CancellationError {
+                s.cancel()
             } catch {
                 self.lastInput = s.builtInput
                 guard !Task.isCancelled else { return }
@@ -406,10 +409,7 @@ final class Controller {
                 overlay.flash("\"\(word)\" is already in your dictionary")
                 return
             }
-            var s = (try? String(contentsOf: Paths.dictionary, encoding: .utf8)) ?? ""
-            if !s.isEmpty && !s.hasSuffix("\n") { s += "\n" }
-            s += word + "\n"
-            try? s.write(to: Paths.dictionary, atomically: true, encoding: .utf8)
+            guard DictionaryFile.append([word]) else { overlay.flash("Couldn't save the dictionary — nothing changed"); return }
             overlay.flash("Added \"\(word)\" to dictionary ✓")
         }
     }

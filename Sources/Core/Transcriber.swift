@@ -38,7 +38,9 @@ enum Prompt {
         let cat = StyleCategory.of(bundleID: bundleID)
         var hint = "- สไตล์ที่ผู้ใช้เลือกสำหรับ\(cat.title): \(Store.config.style(for: cat).promptHint) (ปรับเฉพาะรูปแบบ ห้ามเปลี่ยนคำที่พูด)"
         if let h = Store.config.appHints[bundleID] { hint += "\n- ลักษณะการเขียนในแอปนี้: \(h)" }
-        let about = (try? String(contentsOf: Paths.aboutMe, encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines)
+        // ค่าตัวอย่างที่มากับแอป (ขึ้นต้น "(ตัวอย่าง") ยังไม่ได้แก้ = ไม่ใช่ข้อมูลของผู้ใช้จริง → ไม่ใส่ใน prompt
+        var about = (try? String(contentsOf: Paths.aboutMe, encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if about?.hasPrefix("(ตัวอย่าง") == true { about = nil }
         return template
             .replacingOccurrences(of: "{{APP}}", with: app.isEmpty ? "ไม่ทราบ" : app)
             .replacingOccurrences(of: "{{APP_HINT}}", with: hint)
@@ -140,7 +142,9 @@ enum Clean {
             if latin(last), r.upperBound < out.endIndex, thai(out[r.upperBound]) { v += " " }
             let at = out.distance(from: out.startIndex, to: r.lowerBound)
             out.replaceSubrange(r, with: v)
-            from0 = out.index(out.startIndex, offsetBy: at + v.count)
+            // คำที่แทนอาจรวมกับสระ/วรรณยุกต์ถัดไปเป็นตัวอักษรเดียว → นับเกินท้ายสตริงได้ ห้ามเลยขอบ
+            from0 = out.index(out.startIndex, offsetBy: at + v.count, limitedBy: out.endIndex) ?? out.endIndex
+            if from0 == out.endIndex { break }
         }
         return out
     }
@@ -182,6 +186,14 @@ final class Transcriber {
     }
 
     /// ข้อความ error ที่ผู้ใช้อ่านแล้วรู้ว่าต้องทำอะไร (แยก key ผิด / โควตาเต็ม / ออฟไลน์ / server ล่ม)
+    /// ข้อความ error จาก API: เฉพาะ status + error.status/message ที่ตัดสั้นแล้ว (ไม่เอา body ดิบลง log — อาจมีข้อความผู้ใช้สะท้อนกลับมา)
+    static func httpError(_ status: Int, _ json: [String: Any]?) -> String {
+        let e = json?["error"] as? [String: Any]
+        let code = (e?["status"] as? String) ?? ((json?["detail"] as? [String: Any])?["status"] as? String)
+        let msg = (e?["message"] as? String) ?? ((json?["detail"] as? [String: Any])?["message"] as? String)
+        return ["HTTP \(status)", code, msg.map { String($0.prefix(160)) }].compactMap { $0 }.joined(separator: " ")
+    }
+
     static func friendly(_ error: Error) -> String {
         let m = error.localizedDescription
         if m.contains("ยังไม่ได้ใส่ Gemini API key") || m.contains("ไม่มี Gemini API key") { return "No Gemini API key — add one in Settings" }
@@ -365,22 +377,25 @@ final class Transcriber {
         let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
         let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
         if status == 429 { Self.markThrottled() }
-        guard status == 200 else {
-            let msg = ((json?["error"] as? [String: Any])?["message"] as? String) ?? String(data: data.prefix(200), encoding: .utf8) ?? ""
-            throw WFError("HTTP \(status) \(msg.prefix(160))")
-        }
+        guard status == 200 else { throw WFError(Self.httpError(status, json)) }
         guard let cand = (json?["candidates"] as? [[String: Any]])?.first else {
             let reason = ((json?["promptFeedback"] as? [String: Any])?["blockReason"] as? String) ?? "ไม่มีผลลัพธ์"
             throw WFError(reason)
         }
-        if cand["finishReason"] as? String == "MAX_TOKENS" { Log.write("\(model): ผลยาวเกินกำหนด (ตัดท้าย)") }
+        let finish = cand["finishReason"] as? String ?? "STOP"
+        if finish == "MAX_TOKENS" { Log.write("\(model): ผลยาวเกินกำหนด (ตัดท้าย)") }
         let outParts = ((cand["content"] as? [String: Any])?["parts"] as? [[String: Any]]) ?? []
-        return outParts.filter { ($0["thought"] as? Bool) != true }.compactMap { $0["text"] as? String }.joined()
+        let text = outParts.filter { ($0["thought"] as? Bool) != true }.compactMap { $0["text"] as? String }.joined()
+        // ถูกบล็อก/ตัดจบโดยไม่มีข้อความ (SAFETY, RECITATION, …) ≠ สำเร็จ → ให้ทางสำรองทำงานต่อ
+        if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, finish != "STOP" { throw WFError("\(model): \(finish)") }
+        return text
     }
 
     /// เรียกโมเดลแบบข้อความล้วน (ใช้ตัดสินคำที่ระบบเรียนรู้) — ใช้ตัวแรกในรายการ (แม่นสุด ไม่รีบ)
     func complete(system: String, user: String, json: Bool, key: String? = nil) async throws -> String {
         guard !Store.config.privateMode else { throw WFError("Private mode — ไม่ส่งขึ้น cloud") }
+        // โควตาเต็มอยู่ → งานเบื้องหลัง (เรียนรู้คำ) ไม่ยิงซ้ำ · ทดสอบ key ที่ผู้ใช้กด (ส่ง key มา) ยังยิงได้
+        guard key != nil || !Self.throttled else { throw WFError("HTTP 429 (รอโควตา)") }
         guard let key = key ?? Keys.gemini, let model = Store.config.models.first else { throw WFError("ไม่มี Gemini API key") }
         var cfg: [String: Any] = ["temperature": 0, "thinkingConfig": ["thinkingLevel": model.contains("lite") ? "minimal" : "low"]]
         if json { cfg["responseMimeType"] = "application/json" }
@@ -397,9 +412,11 @@ final class Transcriber {
         req.timeoutInterval = 20
         let (data, resp) = try await session.data(for: req)
         let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
-        guard (resp as? HTTPURLResponse)?.statusCode == 200,
+        let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
+        if status == 429 { Self.markThrottled() }
+        guard status == 200,
               let parts = (((json?["candidates"] as? [[String: Any]])?.first?["content"] as? [String: Any])?["parts"] as? [[String: Any]]) else {
-            throw WFError("HTTP \((resp as? HTTPURLResponse)?.statusCode ?? 0)")
+            throw WFError(Self.httpError(status, json))
         }
         return parts.filter { ($0["thought"] as? Bool) != true }.compactMap { $0["text"] as? String }.joined()
     }
@@ -428,7 +445,7 @@ final class Transcriber {
         let (data, resp) = try await session.data(for: req)
         let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
         guard status == 200, let json = try JSONSerialization.jsonObject(with: data) as? [String: Any], let text = json["text"] as? String else {
-            throw WFError("HTTP \(status) \(String(data: data.prefix(160), encoding: .utf8) ?? "")")
+            throw WFError(Self.httpError(status, (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]))
         }
         return text
     }

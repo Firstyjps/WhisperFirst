@@ -125,7 +125,10 @@ final class LiveTranscriber: NSObject {
                 self.finished = true
                 if !self.endSent { self.endSent = true; self.send(["realtimeInput": ["audioStreamEnd": true]]) }
                 // ช่วงสุดท้ายจบไปแล้ว (หยุดพูดก่อนปล่อยปุ่ม) → ได้ครบแล้ว ไม่ต้องรอ
-                if self.allFinal && !self.inSegment { c.resume(returning: self.committed.joined(separator: " ")); return }
+                if self.allFinal && !self.inSegment {
+                    self.q.asyncAfter(deadline: .now() + 0.5) { self.close() }   // ได้ครบแล้วก็ต้องปิด socket ด้วย
+                    c.resume(returning: self.committed.joined(separator: " ")); return
+                }
                 self.waiter = c
                 self.q.asyncAfter(deadline: .now() + timeout) {
                     if let w = self.waiter { self.waiter = nil; Log.write("live: รอข้อความสุดท้ายไม่ทัน \(timeout)s"); w.resume(returning: nil) }
@@ -199,7 +202,10 @@ final class LiveTranscriber: NSObject {
             }
             return
         }
-        if let err = json["error"] { Log.write("live: error \(err)") }
+        if let e = json["error"] as? [String: Any] {
+            // ไม่ลงทั้ง object (อาจมีข้อความที่ถอดสะท้อนกลับมา) — เฉพาะ status + message สั้นๆ
+            Log.write("live: error \((e["status"] as? String) ?? "?") \(((e["message"] as? String) ?? "").prefix(120))")
+        } else if json["error"] != nil { Log.write("live: error") }
         if let va = (json["voiceActivity"] as? [String: Any])?["type"] as? String {
             let offset = ((json["voiceActivity"] as? [String: Any])?["audioOffset"] as? String)
                 .flatMap { Double($0.trimmingCharacters(in: CharacterSet(charactersIn: "s"))) }

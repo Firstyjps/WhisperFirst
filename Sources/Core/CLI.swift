@@ -28,6 +28,7 @@ public enum WFCLI {
         if args.count >= 3, args[1] == "render-hub" { return renderHub(args[2]) }
         if args.count >= 3, args[1] == "render-guide" { return renderGuide(args[2]) }
         if args.count >= 2, args[1] == "seed-test" { return seedTest() }
+        if args.count >= 2, args[1] == "audit-test" { return auditTest() }
         guard args.count >= 3, args[1] == "transcribe" else {
             print("ใช้: wf stream <file.wav> [--gap 0.5] [--nospec]   (จำลองพูดตามเวลาจริง วัดเวลาหลังปล่อยปุ่ม)")
             print("    wf learn \"ข้อความที่ระบบวาง\" \"ข้อความหลังแก้\"   (ทดสอบ diff + การตัดสินคำ ไม่เขียนพจนานุกรม)")
@@ -483,6 +484,52 @@ public enum WFCLI {
 
     /// เรนเดอร์ไกด์ครั้งแรกทุกขั้นเป็นภาพ → <prefix>-<ขั้น>.png (ใช้ปุ่มลัดค่าเริ่มต้น)
     /// ทดสอบ Paths.seedFromBundle (ติดตั้งจาก DMG) ในโฟลเดอร์ชั่วคราว — ไม่แตะไฟล์ของผู้ใช้
+    /// ข้อแก้จาก audit 9 ต.ค. (P2) ที่ทดสอบได้โดยไม่ต้องเปิดแอป
+    static func auditTest() {
+        var fails = 0
+        func check(_ name: String, _ ok: Bool) { print("\(ok ? "✓" : "✗") \(name)"); if !ok { fails += 1 } }
+        // P2-33: ตัดเฉพาะประโยคที่ Whisper แต่งเอง ไม่ตัดประโยคจริงที่มีคำเหล่านี้
+        for (t, want) in [("ขอบคุณที่รับชม", true), ("ขอบคุณที่รับชมครับ", true), ("  ", true), ("Thank you for watching.", true),
+                          ("ฝากกดติดตามช่องของเพื่อนด้วยนะ", false), ("เปิดซับไตเติ้ลภาษาไทยให้หน่อย", false), ("ประชุมบ่ายสองนะ", false)] {
+            check("hallucination \"\(t)\" → \(want)", LocalWhisper.isHallucination(t) == want)
+        }
+        // P2-74: คำที่แทนรวมกับตัวก่อนหน้าเป็นตัวอักษรเดียว → ไม่ล่ม
+        check("replace ท้ายสตริงที่รวม grapheme ไม่ล่ม", Clean.replace("ax", "x", "\u{0E49}") == "a\u{0E49}")
+        check("replace ปกติยังทำงาน", Clean.replace("ใช้กิตฮับ", "กิตฮับ", "GitHub") == "ใช้ GitHub")
+        // P2-40: บรรทัดที่ไฟล์จะอ่านผิด
+        check("เพิ่มคำ: # = โน้ต → ปฏิเสธ", DictionaryModel.problem("#tag") != nil)
+        check("เพิ่มคำ: ข้างว่าง → ปฏิเสธ", DictionaryModel.problem("abc =>") != nil && DictionaryModel.problem("~> x") != nil)
+        check("เพิ่มคำ: คู่ปกติ/คำเดี่ยว → ผ่าน", DictionaryModel.problem("a => b") == nil && DictionaryModel.problem("NokNok") == nil)
+        // P2-72: เขียนไม่ได้ → false และไม่ทิ้งไฟล์ชั่วคราว
+        let fm = FileManager.default
+        let tmp = fm.temporaryDirectory.appendingPathComponent("wf-audit-\(UUID().uuidString)")
+        defer { try? fm.removeItem(at: tmp) }
+        try? fm.createDirectory(at: tmp, withIntermediateDirectories: true)
+        let ok = Files.writeSecure(Data("x".utf8), to: tmp.appendingPathComponent("a.txt"))
+        let perm = (try? fm.attributesOfItem(atPath: tmp.appendingPathComponent("a.txt").path))?[.posixPermissions] as? Int
+        check("writeSecure สำเร็จ → true + สิทธิ์ 600", ok && perm == 0o600)
+        try? fm.setAttributes([.posixPermissions: 0o500], ofItemAtPath: tmp.path)   // โฟลเดอร์เขียนไม่ได้
+        let bad = Files.writeSecure(Data("y".utf8), to: tmp.appendingPathComponent("b.txt"))
+        try? fm.setAttributes([.posixPermissions: 0o700], ofItemAtPath: tmp.path)
+        let left = ((try? fm.contentsOfDirectory(atPath: tmp.path)) ?? []).filter { $0.hasPrefix(".") }
+        check("writeSecure เขียนไม่ได้ → false ไม่มีไฟล์ชั่วคราวค้าง", !bad && left.isEmpty)
+        // P2-1: dictionary/about-me ที่วางจากในแอป สิทธิ์ 600
+        let res = tmp.appendingPathComponent("Resources"), sup = tmp.appendingPathComponent("Support")
+        for rel in ["prompts/a.md", "defaults/dictionary.txt", "defaults/about-me.md"] {
+            let u = res.appendingPathComponent(rel)
+            try? fm.createDirectory(at: u.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try? "x".write(to: u, atomically: true, encoding: .utf8)
+            try? fm.setAttributes([.posixPermissions: 0o644], ofItemAtPath: u.path)
+        }
+        Paths.seedFromBundle(resources: res, into: sup)
+        for name in ["dictionary.txt", "about-me.md"] {
+            let p = (try? fm.attributesOfItem(atPath: sup.appendingPathComponent(name).path))?[.posixPermissions] as? Int
+            check("seed \(name) สิทธิ์ 600", p == 0o600)
+        }
+        print(fails == 0 ? "ผ่านทั้งหมด" : "ไม่ผ่าน \(fails) ข้อ")
+        if fails > 0 { exit(1) }
+    }
+
     static func seedTest() {
         let fm = FileManager.default
         let tmp = fm.temporaryDirectory.appendingPathComponent("wf-seed-\(UUID().uuidString)")
