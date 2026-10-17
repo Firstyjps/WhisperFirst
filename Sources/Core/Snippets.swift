@@ -43,6 +43,23 @@ enum Snippets {
     private static let particles = ["ครับ", "คับ", "ค่ะ", "คะ", "นะ", "น่ะ", "จ้า", "จ้ะ", "เลย", "ด้วย", "หน่อย"]
 
     private static func isLatin(_ c: Character) -> Bool { c.isASCII && (c.isLetter || c.isNumber) }
+    private static func isThai(_ c: Character) -> Bool { c.unicodeScalars.first.map { (0x0E00...0x0E7F).contains($0.value) } ?? false }
+
+    /// ตำแหน่ง (UTF-16) ที่เป็นขอบคำ — ต้นข้อความ ท้ายข้อความ และต้น/ท้ายของทุกคำที่ตัดได้
+    /// fragments = จุดที่ตามด้วยเศษคำ (เช่น "อีเมล|ล์") — ตัวตัดคำแยกตัวการันต์ออกมา แปลว่าจริงๆ เป็นคำเดียวกัน
+    private static func wordEdges(_ s: String) -> (edges: Set<Int>, fragments: Set<Int>) {
+        let ns = s as NSString
+        var out: Set<Int> = [0, ns.length], frag: Set<Int> = []
+        guard let tok = CFStringTokenizerCreate(nil, s as CFString, CFRange(location: 0, length: ns.length),
+                                                kCFStringTokenizerUnitWordBoundary, Locale(identifier: "th_TH") as CFLocale) else { return (out, frag) }
+        while !CFStringTokenizerAdvanceToNextToken(tok).isEmpty {
+            let r = CFStringTokenizerGetCurrentTokenRange(tok)
+            out.insert(r.location); out.insert(r.location + r.length)
+            let w = ns.substring(with: NSRange(location: r.location, length: r.length))
+            if w.count <= 3, w.contains("\u{0E4C}") { frag.insert(r.location) }   // ์ (การันต์)
+        }
+        return (out, frag)
+    }
 
     /// ไม่สนช่องว่างระหว่างตัวอักษร ("อีเมล ฉัน" = "อีเมลฉัน") · ตัวพิมพ์เล็กใหญ่ · คำอังกฤษต้องตรงทั้งคำ
     static func regex(for trigger: String) -> NSRegularExpression? {
@@ -78,9 +95,20 @@ enum Snippets {
         for (i, s) in items.enumerated() {
             guard let re = regex(for: s.trigger) else { continue }
             let ns = out as NSString
-            guard re.firstMatch(in: out, range: NSRange(location: 0, length: ns.length)) != nil else { continue }
-            out = re.stringByReplacingMatches(in: out, range: NSRange(location: 0, length: ns.length),
-                                              withTemplate: NSRegularExpression.escapedTemplate(for: "\u{E000}\(i)\u{E001}"))
+            var ms = re.matches(in: out, range: NSRange(location: 0, length: ns.length))
+            // คำเรียกภาษาไทย: ไทยไม่มีเว้นวรรค → ต้องตรงขอบคำ (ตัดคำด้วยพจนานุกรมไทยของระบบ) ไม่งั้น "อีเมล" ไปติดกลาง "อีเมลล์"
+            let t = s.trigger.filter { !$0.isWhitespace }
+            if let f = t.first, let l = t.last, isThai(f) || isThai(l) {
+                let (edges, fragments) = wordEdges(out)
+                ms = ms.filter { m in
+                    let end = m.range.location + m.range.length
+                    return (!isThai(f) || edges.contains(m.range.location)) && (!isThai(l) || (edges.contains(end) && !fragments.contains(end)))
+                }
+            }
+            guard !ms.isEmpty else { continue }
+            let m = NSMutableString(string: out)
+            for x in ms.reversed() { m.replaceCharacters(in: x.range, with: "\u{E000}\(i)\u{E001}") }
+            out = m as String
             used.append(s.trigger)
         }
         guard !used.isEmpty else { return (text, []) }

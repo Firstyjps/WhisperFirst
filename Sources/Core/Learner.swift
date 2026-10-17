@@ -63,7 +63,7 @@ enum EditDiff {
 }
 
 /// เรียนรู้คำจากการแก้ไขหลังวาง (แบบ Wispr Flow):
-/// วางเสร็จ → จำตำแหน่งในช่องพิมพ์ → อ่านซ้ำทุก 1.5 วิ → ผู้ใช้แก้แล้วนิ่ง 6 วิ → diff → Gemini ตัดสินว่าเป็น "คำศัพท์ที่ฟังผิด" ไหม → เพิ่มลงพจนานุกรม
+/// วางเสร็จ → จำตำแหน่งในช่องพิมพ์ → อ่านซ้ำทุก 2 วิ → ผู้ใช้แก้แล้วนิ่ง 6 วิ → diff → Gemini ตัดสินว่าเป็น "คำศัพท์ที่ฟังผิด" ไหม → เพิ่มลงพจนานุกรม
 @MainActor
 final class Learner {
     struct Learned { let word: String; let lines: [String] }
@@ -77,6 +77,8 @@ final class Learner {
         let inserted: String
         let prefix: String
         let suffix: String
+        /// ตำแหน่งที่วางไว้ตอนเริ่ม — ข้อความรอบๆ ซ้ำหลายที่ (เช่นแชทที่มีประโยคเดิมหลายครั้ง) ให้ใช้จุดที่ใกล้ตรงนี้ที่สุด
+        let loc: Int
         var current: String
         var changedAt: Date
         let startedAt: Date
@@ -118,21 +120,32 @@ final class Learner {
         let end = loc + len
         let prefix = ns.substring(with: NSRange(location: max(0, loc - 30), length: min(30, loc)))
         let suffix = ns.substring(with: NSRange(location: end, length: min(30, ns.length - end)))
-        watch = Watch(el: el, inserted: inserted, prefix: prefix, suffix: suffix, current: inserted, changedAt: Date(), startedAt: Date())
+        watch = Watch(el: el, inserted: inserted, prefix: prefix, suffix: suffix, loc: loc, current: inserted, changedAt: Date(), startedAt: Date())
         timer?.invalidate()
-        timer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { [weak self] _ in
+        // อ่านทั้งช่องทุก 2 วิ (ช่องยาวๆ อ่านแพง) — พอสำหรับจับการแก้ที่นิ่งแล้ว 6 วิ
+        timer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.tick() }
         }
     }
 
     /// ช่วงข้อความที่เคยเป็นของเรา: ระหว่าง prefix กับ suffix เดิม
-    nonisolated static func region(in value: String, prefix: String, suffix: String, approx: Int) -> String? {
+    nonisolated static func region(in value: String, prefix: String, suffix: String, approx: Int, near: Int? = nil) -> String? {
         let ns = value as NSString
         var start = 0
         if !prefix.isEmpty {
-            let r = ns.range(of: prefix)
-            guard r.location != NSNotFound else { return nil }
-            start = r.location + r.length
+            // prefix เจอหลายที่ → เลือกตัวที่จบใกล้ตำแหน่งที่วางไว้ที่สุด (ไม่ใช่ตัวแรกของช่อง)
+            var best: Int?
+            var from = 0
+            while from < ns.length {
+                let r = ns.range(of: prefix, options: [], range: NSRange(location: from, length: ns.length - from))
+                guard r.location != NSNotFound else { break }
+                let end = r.location + r.length
+                if best == nil || abs(end - (near ?? 0)) < abs(best! - (near ?? 0)) { best = end }
+                if near == nil { break }
+                from = r.location + 1
+            }
+            guard let b = best else { return nil }
+            start = b
         }
         var end = ns.length
         if !suffix.isEmpty {
@@ -169,21 +182,21 @@ final class Learner {
         guard var w = watch else { return }
         let now = Date()
         guard let value else {
-            // อ่านไม่ได้ครั้งเดียวอาจแค่แอปตอบช้า → รอ 3 ครั้งติด (~4.5 วิ) ก่อนเลิก
+            // อ่านไม่ได้ครั้งเดียวอาจแค่แอปตอบช้า → รอ 3 ครั้งติด (~6 วิ) ก่อนเลิก
             w.misses += 1
             watch = w
             if w.misses >= 3 { flush() }
             return
         }
         w.misses = 0
-        guard let region = Self.region(in: value, prefix: w.prefix, suffix: w.suffix, approx: (w.inserted as NSString).length) else {
+        guard let region = Self.region(in: value, prefix: w.prefix, suffix: w.suffix, approx: (w.inserted as NSString).length, near: w.loc) else {
             flush()   // ช่องปิดไป/ข้อความรอบๆ เปลี่ยนมาก → ใช้สิ่งที่เห็นล่าสุด
             return
         }
         if region != w.current { w.current = region; w.changedAt = now }
         watch = w
         let idle = now.timeIntervalSince(w.changedAt), age = now.timeIntervalSince(w.startedAt)
-        if (w.current != w.inserted && idle > 6) || age > 120 || (w.current == w.inserted && age > 45) { flush() }
+        if (w.current != w.inserted && idle > 6) || age > 90 || (w.current == w.inserted && age > 45) { flush() }
     }
 
     /// จบการติดตาม (เริ่มพูดรอบใหม่ / ครบเวลา) แล้วประมวลผลสิ่งที่ผู้ใช้แก้
@@ -286,7 +299,8 @@ final class Learner {
     func undoLast() {
         guard let l = lastLearned, let s = DictionaryFile.read() else { return }
         var out = s.components(separatedBy: "\n")
-        for line in l.lines { if let i = out.lastIndex(of: line) { out.remove(at: i) } }
+        // เทียบแบบตัด \r/ช่องว่าง — ไฟล์ CRLF ก็ลบได้
+        for line in l.lines { if let i = out.lastIndex(where: { $0.trimmingCharacters(in: .whitespacesAndNewlines) == line }) { out.remove(at: i) } }
         guard DictionaryFile.write(out.joined(separator: "\n")) else { return }
         lastLearned = nil
     }

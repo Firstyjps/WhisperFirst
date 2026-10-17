@@ -11,8 +11,11 @@ struct SpeechGate {
 
     mutating func feed(rms: Float, samples n: Int) {
         if rms > threshold {
+            let need = Self.rate * 12 / 100   // ≥120ms ติดกัน = พูดจริง (ไม่ใช่เสียงคลิก)
+            let was = voicedRun
             voicedRun += n
-            if voicedRun >= Self.rate * 12 / 100 { voicedTotal += n }   // ≥120ms ติดกัน = พูดจริง (ไม่ใช่เสียงคลิก)
+            // ถึงเกณฑ์ครั้งแรก → นับทั้งช่วงที่สะสมมา (ไม่ใช่แค่ก้อนล่าสุด) ไม่งั้นคำสั้นๆ ("ใช่", "โอเค") ถูกนับว่าไม่ได้พูด
+            if voicedRun >= need { voicedTotal += was < need ? voicedRun : n }
             return
         }
         voicedRun = 0
@@ -54,6 +57,16 @@ final class DictationSession {
     var voicedSeconds: Double { q.sync { Double(gate.voicedTotal) / Double(SpeechGate.rate) } }
 
     func setBefore(_ s: String?) { q.async { self.base.before = s } }
+
+    /// ผลของ op ถ้าเสร็จภายในเวลา · ไม่ทัน = nil (op ยังทำต่อเบื้องหลังได้ ไม่ถูกยกเลิก)
+    /// (ไม่ใช้ task group: group ต้องรอลูกทุกตัวจบ — การรอ Task.value ไม่หยุดตามการยกเลิก จะกลายเป็นรอไม่มีกำหนดเหมือนเดิม)
+    static func within<T: Sendable>(_ seconds: Double, _ op: @escaping @Sendable () async -> T?) async -> T? {
+        let once = OnceFlag()
+        return await withCheckedContinuation { (c: CheckedContinuation<T?, Never>) in
+            Task { let v = await op(); if once.take() { c.resume(returning: v) } }
+            Task { try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000)); if once.take() { c.resume(returning: nil) } }
+        }
+    }
 
     /// แอปกำลังเล่นเสียงเริ่ม (Tink) → ไม่นับ ~0.25 วิถัดไป
     func ignoreNext(seconds: Double) {
@@ -156,7 +169,8 @@ final class DictationSession {
             }
             Log.write("live final +\(Int(Date().timeIntervalSince(t0) * 1000))ms (\(tx.count) ตัว)")
             var result: DictationResult?
-            if let e = q.sync(execute: { early }), e.text == tx, let r = try? await e.task.value {
+            // ผลเกลาล่วงหน้า: รอไม่เกิน 1.5 วิ (Gemini ค้าง → ไปทางข้อความ/เสียงต่อ ไม่รอไม่มีกำหนด)
+            if let e = q.sync(execute: { early }), e.text == tx, let r = await Self.within(1.5, { try? await e.task.value }) {
                 result = r; usedEarly = true
             }
             if result == nil {
@@ -226,4 +240,11 @@ final class DictationSession {
         live?.cancel()
         q.async { self.early?.task.cancel(); self.early = nil }
     }
+}
+
+/// true ครั้งแรกครั้งเดียว (ใช้กันการ resume continuation ซ้ำ)
+final class OnceFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var done = false
+    func take() -> Bool { lock.withLock { defer { done = true }; return !done } }
 }

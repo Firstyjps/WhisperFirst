@@ -65,9 +65,23 @@ final class ShortcutsModel: ObservableObject {
         var list = combos(slot.action)
         if let i = slot.index, i < list.count { list[i] = combo } else { list.append(combo) }
         bindings[slot.action] = list
-        message = "\(slot.action.title) is now \(Self.display(combo))"
+        message = "\(slot.action.title) is now \(Self.display(combo))" + (Self.caution(combo).map { " · " + $0 } ?? "")
         messageIsError = false
         save()
+    }
+
+    /// ใช้ได้ แต่อาจไม่ทำงานตามคาด → เตือน (ไม่ห้าม เพราะผู้ใช้เลือกเอง)
+    static func caution(_ c: KeyCombo) -> String? {
+        let mods = Set(c.filter(Keys2.isModifier).map(Keys2.agnostic)), keys = c.filter { $0.hasPrefix("k:") }
+        // F1–F12 เดี่ยว: คีย์บอร์ด Mac ส่งเป็นปุ่มสื่อ (ความสว่าง/เสียง) ถ้าไม่ได้กด fn หรือตั้ง "Use F1, F2… as standard function keys"
+        if c.count == 1, let t = c.first, Keys2.isFunctionKey(t), let n = Int(Keys2.label(t).dropFirst()), n <= 12 {
+            return "on Mac keyboards this needs fn held, unless F-keys are set as standard function keys in System Settings"
+        }
+        // ⌃Space / ⌃⌘Space = สลับภาษา / Emoji ของระบบ
+        if keys == ["k:\(kVK_Space)"], mods == ["ctrl"] || mods == ["ctrl", "cmd"] {
+            return "macOS uses this to switch input source or open Emoji — it may stop working there"
+        }
+        return nil
     }
 
     private func validate(_ c: KeyCombo, for slot: Slot) -> String? {

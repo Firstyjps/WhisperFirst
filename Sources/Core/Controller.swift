@@ -1,4 +1,5 @@
 import AppKit
+import AVFoundation
 import Carbon.HIToolbox
 
 /// วงจรหลัก: กดค้าง → อัด (ส่งเกลาล่วงหน้าตอนเงียบ) → ปล่อย → วางลงแอปที่ใช้อยู่ → เฝ้าดูการแก้ไขเพื่อเรียนรู้คำ
@@ -20,6 +21,12 @@ final class Controller {
     let shortcuts = ShortcutEngine()
     private(set) var lastText: String?
     private(set) var lastInput: DictationInput?
+    /// เสียงของรอบที่ล้มเหลว — รอบถัดไปที่สำเร็จไม่ทับ (ลองใหม่ได้จนกว่าจะสำเร็จ)
+    private var lastFailed: DictationInput?
+    /// ที่ "Retry" จะใช้: รอบที่ล้มก่อน · ไม่มี = รอบล่าสุด (ลองถอดใหม่ได้ถ้าผลไม่ถูกใจ)
+    var retryInput: DictationInput? { lastFailed ?? lastInput }
+    /// ช่องที่โฟกัสตอนเริ่มพูด (window ของมัน) — ระหว่างรอเกลา ผู้ใช้คลิกไปช่องอื่นในแอปเดิม → ไม่วาง
+    private var targetWindow: AXUIElement?
 
     private let recorder = Recorder()
     private let ducker = AudioDucker()
@@ -52,7 +59,12 @@ final class Controller {
         shortcuts.onEscape = { [weak self] in MainActor.assumeIsolated { self?.escape() } }
         shortcuts.start()
         recorder.voiceProcessing = Store.config.noiseReduction
-        recorder.prewarm()   // เปิดตัวลดเสียงรบกวนไว้ก่อน (~0.9 วิ) — กดพูดแล้วไมค์เปิดทันที
+        prewarmMic()
+        recorder.onInterrupted = { [weak self] in
+            guard let self, self.state == .recording else { return }
+            self.cancel(silent: true)
+            self.overlay.flash("Microphone changed — please try again")
+        }
         // ลำโพงที่ต้องหยุดเพลงแทน → ขอสิทธิ์ฟังเสียงแอปตอนนี้ (ไม่ให้ dialog เด้งกลางประโยค) · ติดตั้งใหม่ปล่อยให้ไกด์ทำงานก่อน
         if Store.config.onboarded, Store.config.muteWhileTalking != .off, AudioDucker.pausesInsteadOfLowering { PlaybackProbe.requestPermission() }
         recorder.onLevel = { [weak self] level in
@@ -69,6 +81,13 @@ final class Controller {
         overlay.onRetry = { [weak self] in self?.retryLast() }
         overlay.onUndoLearned = { [weak self] in self?.learner.undoLast() }
         updateHint()
+    }
+
+    /// เปิดตัวลดเสียงรบกวนไว้ก่อน (~0.9 วิ) — กดพูดแล้วไมค์เปิดทันที
+    /// ติดตั้งใหม่/ยังไม่ได้สิทธิ์ไมค์ → ยังไม่แตะไมค์ (ไม่ให้ dialog ขอสิทธิ์เด้งก่อนไกด์) — ไกด์จบแล้วเรียกอีกครั้ง
+    func prewarmMic() {
+        guard Store.config.onboarded, AVCaptureDevice.authorizationStatus(for: .audio) == .authorized else { return }
+        recorder.prewarm()
     }
 
     func demoIsland() {
@@ -169,7 +188,8 @@ final class Controller {
 
     private func begin(command: Bool) {
         // ช่องรหัสผ่าน (Secure Input) → ไม่ฟัง: macOS ส่งแค่ modifier มา จับการพิมพ์แทรกไม่ได้ เสี่ยงวางลงช่องรหัสผ่าน
-        if IsSecureEventInputEnabled() {
+        // Secure Input เปิดอยู่แต่ช่องที่โฟกัสอ่านได้และไม่ใช่ช่องรหัสผ่าน (แอปอื่นค้าง Secure Input ไว้) → ยังพูดได้
+        if IsSecureEventInputEnabled(), AX.focusedFieldIsSecure() != false {
             overlay.flash("Can't listen while a password field is active")
             return
         }
@@ -197,7 +217,8 @@ final class Controller {
         recorder.voiceProcessing = Store.config.noiseReduction
         do { try recorder.start() } catch {
             session = nil; live = nil
-            overlay.flash("Couldn't open microphone: \(error.localizedDescription)")
+            Log.write("mic: เปิดไม่ได้ \(error.localizedDescription)")   // ข้อความดิบ (อาจเป็น NSException) ลง log อย่างเดียว
+            overlay.flash("Couldn't open the microphone — check it's connected and allowed")
             return
         }
         pressAt = Date()
@@ -243,9 +264,12 @@ final class Controller {
         let useContext = Store.config.useContext && !Self.noContextApps.contains(target.bundle)
         // เปิด accessibility tree ของแอป Electron เฉพาะเมื่อต้องอ่านช่อง (บริบท / เรียนรู้คำ) — ปิดทั้งคู่ = ไม่แตะแอปนั้น
         let needAX = useContext || (Store.config.learnFromEdits && !Store.config.privateMode)
-        DispatchQueue.global(qos: .userInitiated).async {
+        targetWindow = nil
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             if let pid, needAX { AX.enableManualAccessibility(pid: pid) }
+            let win = AX.focusedWindow()
             s.setBefore(useContext ? AX.textBeforeCursor() : nil)
+            DispatchQueue.main.async { [weak self] in if self?.session === s { self?.targetWindow = win } }
         }
     }
 
@@ -259,6 +283,7 @@ final class Controller {
         restoreAudio()
         commitWork?.cancel()
         recorder.stop()
+        recorder.onChunk = nil   // ไม่ค้าง session เก่าไว้จนกดครั้งถัดไป
         session?.cancel()
         session = nil
         live?.cancel()
@@ -290,6 +315,7 @@ final class Controller {
             try? await Task.sleep(nanoseconds: 150_000_000)
             guard let self, !Task.isCancelled else { s.cancel(); return }   // Esc ช่วงนี้ → ปิด Live socket ด้วย
             self.recorder.stop()
+            self.recorder.onChunk = nil
             let seconds = s.seconds, peak = s.peakValue
             guard seconds >= 0.4, peak >= 0.008 else {
                 s.cancel()
@@ -304,10 +330,10 @@ final class Controller {
             }
             do {
                 let r = try await s.finish(selected: selected)
+                guard !Task.isCancelled else { return }   // ยกเลิกแล้ว → ไม่ทับเสียงของรอบก่อน
                 self.lastInput = s.builtInput
-                guard !Task.isCancelled else { return }
                 Log.write("หลังปล่อยปุ่ม \(Int(Date().timeIntervalSince(released) * 1000))ms\(s.usedEarly ? " (เกลาล่วงหน้า)" : s.usedText ? " (ข้อความ Live)" : " (ส่งเสียง)")")
-                self.deliver(r, command: command, seconds: seconds, auto: auto)
+                self.deliver(r, command: command, seconds: seconds, auto: auto, before: s.builtInput?.before)
             } catch is DictationSession.NoSpeech {
                 guard !Task.isCancelled else { return }
                 self.lastInput = s.builtInput
@@ -317,8 +343,9 @@ final class Controller {
             } catch is CancellationError {
                 s.cancel()
             } catch {
-                self.lastInput = s.builtInput
                 guard !Task.isCancelled else { return }
+                self.lastInput = s.builtInput
+                self.lastFailed = s.builtInput
                 self.failed(error)
             }
         }
@@ -326,7 +353,7 @@ final class Controller {
 
     /// ลองใหม่กับเสียงล่าสุด (เช่นตอนเน็ตหลุด)
     func retryLast() {
-        guard state == .idle, let input = lastInput else { return }
+        guard state == .idle, let input = retryInput else { return }
         state = .processing
         overlay.thinking(command: input.command)
         task = Task { [weak self] in
@@ -334,7 +361,8 @@ final class Controller {
             do {
                 let r = try await self.transcriber.run(input)
                 guard !Task.isCancelled else { return }
-                self.deliver(r, command: input.command, seconds: input.seconds)
+                self.lastFailed = nil
+                self.deliver(r, command: input.command, seconds: input.seconds, before: input.before)
             } catch is CancellationError {
             } catch {
                 guard !Task.isCancelled else { return }   // ถูกยกเลิกแล้ว (Esc) → อย่าไปทับสถานะของการพูดรอบใหม่
@@ -350,7 +378,8 @@ final class Controller {
         overlay.error(Transcriber.friendly(error))
     }
 
-    private func deliver(_ r: DictationResult, command: Bool, seconds: Double, auto: Bool = false) {
+    /// before = ข้อความก่อนเคอร์เซอร์ที่อ่านไว้ตอนเริ่มพูด (ไม่อ่าน AX ซ้ำบน main ตอนวาง — แอปช้าทำ UI ค้างได้ถึงวินาที)
+    private func deliver(_ r: DictationResult, command: Bool, seconds: Double, auto: Bool = false, before: String? = nil) {
         task = nil
         state = .idle
         var r = r
@@ -369,8 +398,12 @@ final class Controller {
         }
         // ไม่วางถ้า: สลับแอปไประหว่างรอ / ช่องรหัสผ่านทำงานอยู่ / อัดยาวจนครบเวลา → ใส่คลิปบอร์ดให้ผู้ใช้วางเอง
         let front = NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? ""
-        let switched = !target.bundle.isEmpty && front != target.bundle
-        if switched || auto || IsSecureEventInputEnabled() {
+        var switched = !target.bundle.isEmpty && front != target.bundle
+        // แอปเดิมแต่คนละหน้าต่าง (เช่นไปแชทอื่น) → ไม่วางลงที่ใหม่
+        if !switched, let w0 = targetWindow, let w1 = AX.focusedWindow(), !CFEqual(w0, w1) { switched = true }
+        targetWindow = nil
+        let secure = IsSecureEventInputEnabled() && AX.focusedFieldIsSecure() != false
+        if switched || auto || secure {
             Inserter.copy(text)
             lastText = text
             History.append(HistoryEntry(t: Date().timeIntervalSince1970, app: target.name, mode: command ? "command" : "dictate",
@@ -379,7 +412,7 @@ final class Controller {
             return
         }
         // พูดต่อจากข้อความเดิมในบรรทัดเดียวกัน → เว้นวรรคให้ (แบบไทย: เว้นระหว่างประโยค)
-        if !command, Store.config.useContext, !privateApp, let last = AX.textBeforeCursor(limit: 1)?.last, !last.isWhitespace,
+        if !command, Store.config.useContext, !privateApp, let last = before?.last, !last.isWhitespace,
            let first = text.first, !first.isPunctuation, !first.isWhitespace {
             text = " " + text
         }

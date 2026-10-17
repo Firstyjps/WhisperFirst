@@ -20,6 +20,11 @@ final class AudioDucker {
         let muted: Bool   // เราเป็นคนกดปิดเสียง
     }
     private static let key = "wf.audioDucker.saved"
+    /// แอปที่เรากด pause ไว้ — แอปล่มก่อนกด play คืน → เปิดครั้งถัดไปกดคืนให้
+    private static let pausedKey = "wf.audioDucker.paused"
+    /// เลขรอบของการลด/คืนเสียง — งานตรวจซ้ำที่ตั้งไว้รอบก่อนต้องไม่ไปยุ่งกับรอบใหม่
+    private var generation = 0
+    private var launchWatchToken = 0
     private var saved: Saved?
     private var ramp: Timer?
     /// หยุดเพลงด้วยปุ่ม play/pause: แอปที่หยุดไป (nil = ไม่ได้หยุด) · ยืนยันผลแล้วหรือยัง
@@ -42,6 +47,7 @@ final class AudioDucker {
     }
 
     func duck(_ mode: Mode) {
+        generation += 1
         guard mode != .off, saved == nil, paused == nil, !probing, let dev = Self.outputDevice(), let uid = Self.uid(dev) else { return }
         if Self.isMuted(dev) { return }   // ผู้ใช้ปิดเสียงไว้อยู่แล้ว
         if !Self.canMute(dev) && !Self.canSetVolume(dev) { pauseMedia(); return }
@@ -58,6 +64,8 @@ final class AudioDucker {
     }
 
     func restore() {
+        generation += 1
+        let gen = generation
         probing = false
         probeToken += 1
         resumeMedia()
@@ -72,7 +80,8 @@ final class AudioDucker {
         } else if let orig = s.volume, let set = s.setVolume, let now = Self.volume(dev), wasFading || abs(now - set) < 0.02 {
             fade(dev, from: now, to: orig)   // ผู้ใช้ปรับเสียงเองระหว่างพูด → ไม่ทับ
             // ลำโพงไร้สายบางตัว (HomePod) ส่งค่าเก่ากลับมาทับทีหลัง → ตรวจซ้ำ ยังค้างที่ระดับที่เราลดไว้ = ตั้งใหม่
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+                guard self?.generation == gen else { return }   // เริ่มพูดรอบใหม่ไปแล้ว → ห้ามคืนเสียงทับตอนกำลังพูด
                 guard let cur = Self.volume(dev), abs(cur - orig) > 0.02, cur < orig else { return }
                 if cur <= set + 0.02 || !Self.smoothFade(dev) {
                     Self.setVolume(dev, orig)
@@ -138,6 +147,7 @@ final class AudioDucker {
         watchMusicLaunch()
         Self.sendPlayPause()
         paused = media
+        UserDefaults.standard.set(Array(media), forKey: Self.pausedKey)
         Log.write("audio: หยุดเพลงชั่วคราว \(media.sorted())\(peak.map { String(format: " (peak %.3f)", $0) } ?? " (วัดเสียงไม่ได้)")")
         // ตรวจซ้ำ: มีแอปเพลงอื่นดังขึ้นมาแทน (ปุ่มไปโดนแอปผิด) → กดคืนทันที
         let w = DispatchWorkItem { [weak self] in
@@ -147,7 +157,7 @@ final class AudioDucker {
             let started = now.filter(Self.isMedia).subtracting(before)
             // ไม่ใช้ "ยังส่งเสียงอยู่ไหม" ตัดสินว่าหยุดสำเร็จ: เบราว์เซอร์เปิดช่องเสียงค้างไว้แม้ pause แล้ว
             if !started.isEmpty {
-                Self.sendPlayPause(); self.paused = nil
+                Self.sendPlayPause(); self.clearPaused()
                 Log.write("audio: ปุ่ม play/pause ไปโดนแอปอื่น → กดคืน")
             }
         }
@@ -159,18 +169,23 @@ final class AudioDucker {
     private func watchMusicLaunch() {
         stopMusicWatch()
         guard !NSWorkspace.shared.runningApplications.contains(where: { $0.bundleIdentifier == "com.apple.Music" }) else { return }
+        launchWatchToken += 1
+        let token = launchWatchToken
         launchWatch = NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didLaunchApplicationNotification, object: nil, queue: .main) { [weak self] n in
             guard let app = n.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication, app.bundleIdentifier == "com.apple.Music" else { return }
             MainActor.assumeIsolated {
                 guard let self else { return }
                 self.stopMusicWatch()
+                // ผู้ใช้เปิด Music เอง (อยู่หน้าสุด) ในช่วงนี้พอดี → ไม่ปิดของผู้ใช้
+                guard !app.isActive, NSWorkspace.shared.frontmostApplication?.bundleIdentifier != "com.apple.Music" else { return }
                 self.pauseCheck?.cancel(); self.pauseCheck = nil
-                self.paused = nil
+                self.clearPaused()
                 app.terminate()
                 Log.write("audio: Apple Music เด้งขึ้นมาเพราะปุ่ม play/pause → ปิดคืน")
             }
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in self?.stopMusicWatch() }
+        // timer ของรอบเก่าต้องไม่ถอดตัวฟังของรอบใหม่
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in if self?.launchWatchToken == token { self?.stopMusicWatch() } }
     }
 
     private func stopMusicWatch() {
@@ -181,7 +196,7 @@ final class AudioDucker {
     private func resumeMedia() {
         pauseCheck?.cancel(); pauseCheck = nil
         guard paused != nil else { return }
-        paused = nil
+        clearPaused()
         Self.sendPlayPause()
         Log.write("audio: เล่นเพลงต่อ")
     }
@@ -229,7 +244,22 @@ final class AudioDucker {
         if let d = try? JSONEncoder().encode(s) { UserDefaults.standard.set(d, forKey: Self.key) }
     }
 
+    private func clearPaused() {
+        paused = nil
+        UserDefaults.standard.removeObject(forKey: Self.pausedKey)
+    }
+
     private func recoverAfterCrash() {
+        // ล่มระหว่างหยุดเพลงไว้ → กด play คืนครั้งเดียว เฉพาะเมื่อแอปนั้นยังเปิดอยู่และยังเงียบ (ไม่สั่งเล่นของที่ผู้ใช้เล่นต่อเองแล้ว)
+        if let apps = UserDefaults.standard.stringArray(forKey: Self.pausedKey) {
+            UserDefaults.standard.removeObject(forKey: Self.pausedKey)
+            let running = NSWorkspace.shared.runningApplications.compactMap(\.bundleIdentifier)
+            let open = apps.contains { a in running.contains { $0.hasPrefix(a) || a.hasPrefix($0) } }
+            if open, Self.pausable(Self.outputtingApps()).isEmpty {
+                Self.sendPlayPause()
+                Log.write("audio: เล่นเพลงต่อที่หยุดค้างจากครั้งก่อน")
+            }
+        }
         guard let d = UserDefaults.standard.data(forKey: Self.key), let s = try? JSONDecoder().decode(Saved.self, from: d) else { return }
         saved = s
         restore()
@@ -274,9 +304,15 @@ final class AudioDucker {
         return v as String
     }
 
+    /// หาลำโพงจาก UID ในอุปกรณ์ทั้งหมด (ไม่ใช่แค่ตัวหลักตอนนี้) — เปลี่ยนลำโพงกลางคันก็ยังคืนเสียงตัวเดิมได้ ไม่ค้างเงียบ
     private static func device(uid: String) -> AudioDeviceID? {
-        guard let dev = outputDevice(), Self.uid(dev) == uid else { return nil }   // คืนเฉพาะถ้ายังเป็นลำโพงเดิม
-        return dev
+        if let dev = outputDevice(), Self.uid(dev) == uid { return dev }
+        var a = address(kAudioHardwarePropertyDevices, kAudioObjectPropertyScopeGlobal)
+        var size = UInt32(0)
+        guard AudioObjectGetPropertyDataSize(AudioObjectID(kAudioObjectSystemObject), &a, 0, nil, &size) == noErr, size > 0 else { return nil }
+        var ids = [AudioDeviceID](repeating: 0, count: Int(size) / MemoryLayout<AudioDeviceID>.size)
+        guard AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &a, 0, nil, &size, &ids) == noErr else { return nil }
+        return ids.first { Self.uid($0) == uid }
     }
 
     private static func volume(_ dev: AudioDeviceID) -> Float32? {
@@ -368,17 +404,26 @@ enum PlaybackProbe {
     /// tap อย่างเดียวก่อน — ไม่ยุ่งกับลำโพงเลย (กันเสียงเพลงสะดุด) · ไม่ได้เสียง → ผูกกับลำโพงเป็นนาฬิกาแบบเดิม
     @available(macOS 14.2, *)
     private static func measure(_ desc: CATapDescription, seconds: Double) -> Swift.Result<Float, Failure> {
-        if tapOnlyWorks != false {
+        let state = tapLock.withLock { (tapOnlyWorks, tapOnlyFails) }
+        if state.0 != false {
             let r = measure(desc, seconds: seconds, withOutput: false)
-            if case .success = r { tapOnlyWorks = true; return r }
-            if tapOnlyWorks == nil { tapOnlyWorks = false; Log.write("probe: ฟังแบบ tap อย่างเดียวไม่ได้ → ผูกกับลำโพง") }
-            else { return r }   // เคยใช้ได้ = ครั้งนี้ไม่ได้เพราะเหตุอื่น ไม่ต้องลองซ้ำ
+            if case .success = r { tapLock.withLock { tapOnlyWorks = true; tapOnlyFails = 0 }; return r }
+            if state.0 == true { return r }   // เคยใช้ได้ = ครั้งนี้ไม่ได้เพราะเหตุอื่น ไม่ต้องลองซ้ำ
+            // ล้มครั้งเดียวตอนเปิดเครื่อง (ยังไม่ได้สิทธิ์/อุปกรณ์ยังไม่พร้อม) ไม่ใช่ว่าใช้ไม่ได้ถาวร → ต้องล้ม 3 ครั้งติดก่อนเลิกลอง
+            let gaveUp = tapLock.withLock { () -> Bool in
+                tapOnlyFails += 1
+                if tapOnlyFails >= 3 { tapOnlyWorks = false; return true }
+                return false
+            }
+            if gaveUp { Log.write("probe: ฟังแบบ tap อย่างเดียวไม่ได้ 3 ครั้งติด → ผูกกับลำโพง") }
         }
         return measure(desc, seconds: seconds, withOutput: true)
     }
 
-    /// nil = ยังไม่รู้ (ลองครั้งแรก) — แตะจาก thread ของ probe ทีละครั้ง
+    /// nil = ยังไม่รู้ · แตะจาก thread ของ probe และตอนขอสิทธิ์ → ผ่าน lock เสมอ
     nonisolated(unsafe) private static var tapOnlyWorks: Bool?
+    nonisolated(unsafe) private static var tapOnlyFails = 0
+    private static let tapLock = NSLock()
 
     @available(macOS 14.2, *)
     private static func measure(_ desc: CATapDescription, seconds: Double, withOutput: Bool) -> Swift.Result<Float, Failure> {

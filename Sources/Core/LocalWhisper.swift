@@ -67,7 +67,8 @@ final class LocalWhisper: @unchecked Sendable {
     static var modelURL: URL? {
         if let p = Store.config.offlineModel, !p.isEmpty {
             let u = URL(fileURLWithPath: (p as NSString).expandingTildeInPath)
-            return FileManager.default.fileExists(atPath: u.path) ? u : nil
+            if FileManager.default.fileExists(atPath: u.path) { return u }
+            // path ที่ตั้งไว้หายไป (ย้าย/ลบไฟล์) → ยังหาโมเดลที่ตำแหน่งปกติให้ ไม่ปิดโหมดในเครื่องทั้งหมด
         }
         return modelCandidates.first { FileManager.default.fileExists(atPath: $0.path) }
     }
@@ -158,7 +159,10 @@ final class LocalWhisper: @unchecked Sendable {
             if !raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { Log.write("local: ตัดประโยคที่ Whisper แต่งเอง (\(raw.count) ตัว)") }
             return ""
         }
-        var t = Clean.fillers(raw)
+        // ป้ายที่ไม่ใช่คำพูด ("[Music]", "(เสียงดนตรี)", "*หัวเราะ*") → ตัดทิ้ง
+        var t = raw.replacingOccurrences(of: #"\[[^\]]{1,40}\]|\([^)]{0,40}(เสียง|ดนตรี|เพลง|music|applause|laugh|silence)[^)]{0,40}\)|\*[^*]{1,30}\*"#,
+                                         with: " ", options: [.regularExpression, .caseInsensitive])
+        t = Clean.fillers(t)
         for (from, to) in Prompt.dictionaryEntries().hints { t = Clean.replace(t, from, to, caseInsensitive: true) }
         // Whisper บางทีใส่ "..." / ซ้ำบรรทัดตอนเงียบท้าย
         t = t.replacingOccurrences(of: #"\s*\n\s*"#, with: " ", options: .regularExpression)
@@ -234,7 +238,8 @@ final class LocalWhisper: @unchecked Sendable {
         // รอโหลดโมเดล (ปกติ ~1–3 วิ)
         for _ in 0..<240 {   // ≤60 วิ (เครื่องโหลดหนักอาจโหลดโมเดลช้า)
             guard proc.isRunning else { break }
-            if await Self.ping(p) {
+            // ตอบ ping แล้ว + ลูกของเรายังรันอยู่ (ถ้าลูกตายแต่มีคนอื่นตอบพอร์ตนี้ = ไม่ใช่ server ของเรา)
+            if await Self.ping(p), proc.isRunning {
                 lock.withLock { ready = true }
                 Log.write("local: โหลด \(model.lastPathComponent) เสร็จใน \(Int(Date().timeIntervalSince(t0) * 1000))ms")
                 return true

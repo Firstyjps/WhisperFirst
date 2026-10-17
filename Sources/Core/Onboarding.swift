@@ -27,6 +27,11 @@ final class OnboardingModel: ObservableObject {
     @Published var practice = ""
     @Published var tried = false
     @Published var loginItem = SMAppService.mainApp.status == .enabled
+    /// เปิด Launch at Login ไม่สำเร็จ → บอกเหตุผล (ไม่ใช่สวิตช์เด้งกลับเงียบๆ)
+    @Published var loginNote: String?
+    var trimmedKey: String { geminiKey.trimmingCharacters(in: .whitespacesAndNewlines) }
+    /// key ในช่องคือตัวที่บันทึกไว้แล้ว (เทียบแบบตัดช่องว่าง — วาง key ที่มีวรรคท้ายก็ยังขึ้นติ๊กถูก)
+    var keyIsSaved: Bool { keySaved && !trimmedKey.isEmpty && trimmedKey == (Keys.gemini ?? "") }
     let shortcuts: ShortcutsModel
     let overlay: OverlayModel
     var onFinish: () -> Void = {}
@@ -41,8 +46,12 @@ final class OnboardingModel: ObservableObject {
         timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.refresh() }
         }
-        observer = NotificationCenter.default.addObserver(forName: History.changed, object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { if self?.step == .tryIt { self?.tried = true } }
+        // นับว่า "ลองแล้ว" เฉพาะที่พูดลงช่องฝึกในไกด์ (แอปนี้) ไม่ใช่ประวัติจากแอปอื่น
+        observer = NotificationCenter.default.addObserver(forName: History.changed, object: nil, queue: .main) { [weak self] n in
+            let bundle = (n.object as? HistoryEntry)?.bundle
+            MainActor.assumeIsolated {
+                if self?.step == .tryIt, bundle == Bundle.main.bundleIdentifier { self?.tried = true }
+            }
         }
     }
 
@@ -53,10 +62,12 @@ final class OnboardingModel: ObservableObject {
     }
 
     func refresh() {
+        // ตั้งค่าเฉพาะตอนเปลี่ยน — timer เรียกทุกวินาที ไม่ให้ทั้งหน้า render ใหม่เปล่าๆ
         let s = AVCaptureDevice.authorizationStatus(for: .audio)
-        mic = s == .authorized
-        micDenied = s == .denied || s == .restricted
-        ax = AX.trusted
+        let (m, d, a) = (s == .authorized, s == .denied || s == .restricted, AX.trusted)
+        if mic != m { mic = m }
+        if micDenied != d { micDenied = d }
+        if ax != a { ax = a }
     }
 
     func requestMic() {
@@ -85,9 +96,14 @@ final class OnboardingModel: ObservableObject {
     }
 
     func setLoginItem(_ on: Bool) {
+        loginNote = nil
         do {
             if on { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }
-        } catch { Log.write("login item: \(error.localizedDescription)") }
+        } catch {
+            Log.write("login item: \(error.localizedDescription)")
+            loginNote = "Couldn't change this — \(error.localizedDescription)"
+        }
+        if on, SMAppService.mainApp.status == .requiresApproval { loginNote = "Approve WhisperFirst in System Settings → General → Login Items" }
         loginItem = SMAppService.mainApp.status == .enabled
     }
 
@@ -126,6 +142,15 @@ final class OnboardingModel: ObservableObject {
     }
 
     func back() { if let p = Step(rawValue: step.rawValue - 1) { go(p) } }
+    func goTo(_ s: Step) { go(s) }
+    /// สิ่งที่ยังไม่พร้อม (ไว้แสดงในหน้าสุดท้าย)
+    var missing: [(String, Step)] {
+        var out: [(String, Step)] = []
+        if !mic { out.append(("Microphone isn't allowed yet", .permissions)) }
+        if !ax { out.append(("Accessibility isn't on yet", .permissions)) }
+        if Keys.gemini == nil && !Store.config.privateMode { out.append(("No Gemini key yet", .apiKey)) }
+        return out
+    }
 
     private func go(_ s: Step) {
         forward = s.rawValue > step.rawValue
@@ -200,7 +225,7 @@ struct OnboardingView: View {
         case .permissions: m.mic && m.ax ? "Continue" : "Continue anyway"
         case .apiKey:
             m.geminiKey.trimmingCharacters(in: .whitespaces).isEmpty ? "Skip for now"
-                : m.geminiKey == (Keys.gemini ?? "") ? "Continue"
+                : m.trimmedKey == (Keys.gemini ?? "") ? "Continue"
                 : m.keyCheck == .checking ? "Checking key…"
                 : m.keyCheck != .idle ? "Save anyway" : "Save and continue"
         case .keys: "Try it out"
@@ -251,7 +276,7 @@ struct OnboardingView: View {
                 .zoomIn(0)
             VStack(spacing: 0) {
                 permRow(icon: "mic.fill", title: "Microphone", detail: "To hear you while you hold the key, or in hands-free until you press again. Off the rest of the time.",
-                        ok: m.mic, button: m.micDenied ? "Open Settings" : "Allow", ripple: true) { m.requestMic() }
+                        ok: m.mic, button: m.micDenied ? "Open Settings" : "Allow", ripple: !m.mic) { m.requestMic() }
                     .flipIn(1)
                 Rectangle().fill(Theme.hairline).frame(height: 1)
                 permRow(icon: "keyboard", title: "Accessibility", detail: "To notice your shortcut and type the text into other apps.",
@@ -340,7 +365,7 @@ struct OnboardingView: View {
                         .padding(.horizontal, 12).frame(height: 36)
                         .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Theme.windowBg))
                         .wfOutline(10)
-                    if m.keySaved && m.geminiKey == (Keys.gemini ?? "") {
+                    if m.keyIsSaved {
                         Image(systemName: "checkmark.circle.fill").foregroundStyle(Theme.successText)
                     } else if m.keyCheck == .checking {
                         ProgressView().controlSize(.small)
@@ -480,8 +505,25 @@ struct OnboardingView: View {
         VStack(alignment: .leading, spacing: 18) {
             HStack(spacing: 16) {
                 SuccessSeal(animated: !reduce).background(Confetti(active: !reduce))
-                PageTitle(title: "You're all set 🎉", subtitle: "WhisperFirst lives in your menu bar and works in every app.")
+                PageTitle(title: m.missing.isEmpty ? "You're all set 🎉" : "Almost there",
+                          subtitle: m.missing.isEmpty ? "WhisperFirst lives in your menu bar and works in every app."
+                                                      : "A couple of things still need you before dictation works.")
                     .popScale(1)
+            }
+            if !m.missing.isEmpty {
+                VStack(spacing: 0) {
+                    ForEach(Array(m.missing.enumerated()), id: \.offset) { i, item in
+                        if i > 0 { divider }
+                        HStack(spacing: 14) {
+                            Image(systemName: "exclamationmark.circle.fill").foregroundStyle(Theme.warnText).frame(width: 22)
+                            Text(item.0).font(.system(size: 13.5, weight: .semibold))
+                            Spacer()
+                            Button("Fix") { m.goTo(item.1) }.buttonStyle(.plain).foregroundStyle(Theme.accentText)
+                        }
+                        .padding(.horizontal, 18).padding(.vertical, 12)
+                    }
+                }
+                .wfCard()
             }
             VStack(spacing: 0) {
                 tipRow("menubar.rectangle", "Look for the W in the menu bar", "Paste again, retry the last recording, settings — all there")
@@ -502,6 +544,14 @@ struct OnboardingView: View {
             }
             .padding(.horizontal, 18).padding(.vertical, 14).wfCard()
             .reveal(4)
+            if let note = m.loginNote {
+                HStack(spacing: 10) {
+                    Text(note).font(.system(size: 12.5)).foregroundStyle(Theme.warnText).fixedSize(horizontal: false, vertical: true)
+                    Spacer()
+                    Button("Open") { SMAppService.openSystemSettingsLoginItems() }.buttonStyle(.plain).foregroundStyle(Theme.accentText)
+                }
+                .padding(.horizontal, 4)
+            }
             Text("You can open this guide again from Help.").font(.system(size: 12.5)).foregroundStyle(Theme.muted).reveal(5)
         }
     }

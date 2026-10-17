@@ -56,6 +56,7 @@ final class HubModel: ObservableObject {
     var onDemo: () -> Void = {}
     var onGuide: () -> Void = {}
     private var observer: NSObjectProtocol?
+    private var reloadGen = 0
 
     init(settings: SettingsModel, overlay: OverlayModel) {
         self.settings = settings
@@ -75,9 +76,16 @@ final class HubModel: ObservableObject {
         dictionary.load()
         snippets.load()
         loadStyles()
+        reloadGen += 1
+        let gen = reloadGen
         DispatchQueue.global(qos: .userInitiated).async {
             let list = History.recent(5000)
-            DispatchQueue.main.async { self.entries = list }
+            DispatchQueue.main.async {
+                // โหลดรอบใหม่กว่าเริ่มไปแล้ว → ทิ้งผลนี้ · รายการที่แทรกเข้ามาระหว่างอ่านไฟล์ (ใหม่กว่าในไฟล์) ไม่หาย
+                guard gen == self.reloadGen else { return }
+                let top = list.first?.t ?? 0
+                self.entries = self.entries.filter { $0.t > top } + list
+            }
         }
     }
 
@@ -168,6 +176,8 @@ final class CheckupModel: ObservableObject {
     @Published var online = false
     @Published var seconds: Double = 0
     @Published var checkedAt: Date?
+    /// ต่อไม่ได้เพราะอะไร (ไม่มี key / key ผิด / โควตาเต็ม / ออฟไลน์) — แสดงในช่อง Connection
+    @Published var problem: String?
 
     var allGood: Bool { mic && typing && online }
 
@@ -176,7 +186,8 @@ final class CheckupModel: ObservableObject {
         if state == .checking { return }
         mic = AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
         typing = AX.trusted
-        if let t = checkedAt, Date().timeIntervalSince(t) < 600 { return }
+        // ผลที่ไม่ผ่าน → ตรวจใหม่ทุกครั้งที่เปิดหน้า (ผู้ใช้น่าจะเพิ่งแก้) · ผ่านแล้ว → ใช้ผลเดิมได้ 10 นาที
+        if online, let t = checkedAt, Date().timeIntervalSince(t) < 600 { return }
         run()
     }
 
@@ -187,12 +198,18 @@ final class CheckupModel: ObservableObject {
         Task {
             let t0 = Date()
             var ok = false
+            var why: String?
             if Store.config.privateMode {
                 ok = LocalWhisper.available   // Private mode: ไม่ ping cloud — ดูแค่ว่าถอดในเครื่องได้
+                if !ok { why = LocalWhisper.status }
             } else if Keys.gemini != nil {
-                ok = ((try? await Transcriber().complete(system: "Reply with OK only.", user: "ping", json: false)) ?? "").isEmpty == false
+                do { ok = !(try await Transcriber().complete(system: "Reply with OK only.", user: "ping", json: false)).isEmpty }
+                catch { why = Transcriber.friendly(error) }
+            } else {
+                why = "No Gemini API key — add one below"
             }
             self.online = ok
+            self.problem = ok ? nil : (why ?? "Can't reach the AI — check the internet")
             self.seconds = Date().timeIntervalSince(t0)
             self.checkedAt = Date()
             self.state = .done
@@ -251,7 +268,7 @@ final class DictionaryModel: ObservableObject {
         guard let s = DictionaryFile.read() else { return }
         var lines = s.components(separatedBy: "\n")
         let norm: (String) -> String = { l in
-            var t = l.trimmingCharacters(in: .whitespaces)
+            var t = l.trimmingCharacters(in: .whitespacesAndNewlines)   // ไฟล์ที่ขึ้นบรรทัดแบบ CRLF (\r\n) ก็ลบได้
             for sep in ["=>", "~>"] where t.contains(sep) {
                 let parts = t.components(separatedBy: sep).map { $0.trimmingCharacters(in: .whitespaces) }
                 t = parts.joined(separator: " \(sep) ")
@@ -269,12 +286,14 @@ final class DictionaryModel: ObservableObject {
 @MainActor
 enum AppIcons {
     private static var cache: [String: NSImage] = [:]
-    private static var missing: Set<String> = []
+    /// หาไม่เจอ → จำไว้ 1 นาที (ไม่ค้นซ้ำทุก render แต่แอปที่เพิ่งติดตั้ง/เปิดก็ได้ไอคอนจริง)
+    private static var missing: [String: Date] = [:]
 
     static func icon(app: String, bundle: String?) -> NSImage? {
         let key = (bundle?.isEmpty == false ? bundle! : app)
         if let c = cache[key] { return c }
-        if missing.contains(key) || key.isEmpty { return nil }
+        if key.isEmpty { return nil }
+        if let t = missing[key], Date().timeIntervalSince(t) < 60 { return nil }
         var url: URL?
         if let b = bundle, !b.isEmpty { url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: b) }
         if url == nil {
@@ -284,7 +303,8 @@ enum AppIcons {
             }
         }
         if url == nil { url = NSWorkspace.shared.runningApplications.first { $0.localizedName == app }?.bundleURL }
-        guard let url else { missing.insert(key); return nil }
+        guard let url else { missing[key] = Date(); return nil }
+        missing[key] = nil
         let img = NSWorkspace.shared.icon(forFile: url.path)
         cache[key] = img
         return img
@@ -602,7 +622,7 @@ private struct HomePage: View {
             : "\(st.savedMinutes) \(st.savedMinutes == 1 ? "minute" : "minutes")"
         return HStack(spacing: 14) {
             (Text("You've spoken ") + Text("\(st.words.formatted()) words").bold().foregroundColor(Theme.ink)
-             + Text(" so far — about ") + Text(saved).bold().foregroundColor(Theme.ink) + Text(" you didn't spend typing."))
+             + Text(" in your history — about ") + Text(saved).bold().foregroundColor(Theme.ink) + Text(" you didn't spend typing."))
                 .font(.system(size: 15)).foregroundStyle(Theme.inkSecondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
             if st.streak > 0 {
@@ -671,6 +691,7 @@ struct EntryRow: View {
     let onCopy: () -> Void
     var onDelete: () -> Void = {}
     @StateObject private var hover = HoverState()
+    @StateObject private var confirmDelete = HoverState()   // @State ใช้ไม่ได้ (Command Line Tools ไม่มี macro plugin)
 
     var body: some View {
         HStack(alignment: wrap ? .top : .center, spacing: 14) {
@@ -691,11 +712,15 @@ struct EntryRow: View {
                 .buttonStyle(PillButtonStyle())
                 .accessibilityLabel(copied ? "Copied" : "Copy text")
                 if deletable {
-                    Button { onDelete() } label: {
+                    // ปุ่มซ่อนด้วยตาแต่ยังโฟกัสด้วยคีย์บอร์ดได้ → ลบถาวรต้องยืนยันก่อน (กด Space พลาดครั้งเดียวไม่หาย)
+                    Button { confirmDelete.on = true } label: {
                         Image(systemName: "trash").font(.system(size: 12)).foregroundStyle(Theme.muted)
                             .frame(width: 30, height: 30).background(Circle().fill(Theme.pillBtn))
                     }
                     .buttonStyle(.plain).help("Delete").accessibilityLabel("Delete from history")
+                    .confirmationDialog("Delete this from history?", isPresented: $confirmDelete.on) {
+                        Button("Delete", role: .destructive) { onDelete() }
+                    } message: { Text("This can't be undone.") }
                 }
             }
             .opacity(hover.on || copied ? 1 : 0.001)   // ซ่อนด้วยตา แต่ยังกดผ่านคีย์บอร์ด/VoiceOver ได้

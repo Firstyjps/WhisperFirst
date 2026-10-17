@@ -39,6 +39,11 @@ enum Paths {
             if current == nil || current == (try? Data(contentsOf: orig)) {
                 try? new.write(to: dst, options: .atomic)
                 try? new.write(to: orig, options: .atomic)
+                try? fm.removeItem(at: prompts.appendingPathComponent(file.lastPathComponent + ".new-default"))
+            } else {
+                // ผู้ใช้แก้ prompt นี้เอง → ไม่ทับ แต่วางฉบับใหม่ของแอปไว้ข้างๆ ให้เทียบ/รับเอง (หน้า Settings แจ้ง)
+                let side = prompts.appendingPathComponent(file.lastPathComponent + ".new-default")
+                if (try? Data(contentsOf: side)) != new { try? new.write(to: side, options: .atomic); Log.write("prompts: \(file.lastPathComponent) มีฉบับใหม่ แต่ผู้ใช้แก้ไว้ → วาง .new-default ไว้ข้างๆ") }
             }
         }
     }
@@ -193,7 +198,8 @@ struct Config: Codable {
         keepHistory = v(.keepHistory, d.keepHistory)
         historyDays = v(.historyDays, d.historyDays)
         useSystemElevenLabsKey = v(.useSystemElevenLabsKey, d.useSystemElevenLabsKey)
-        appHints = v(.appHints, d.appHints)
+        // ไฟล์เก็บเฉพาะที่ผู้ใช้แก้ → รวมกับค่าเริ่มต้นของเวอร์ชันนี้ (ไฟล์เก่าที่เก็บครบทุกตัวก็ใช้ได้เหมือนเดิม)
+        appHints = Config.defaultHints.merging(v(.appHints, [String: String]())) { _, saved in saved }
         onboarded = v(.onboarded, true)
     }
 
@@ -233,7 +239,10 @@ struct Config: Codable {
 }
 
 enum Store {
-    private(set) static var config: Config = load()
+    /// อ่านจากหลาย thread (audio/network) และเขียนบน main → ผ่าน lock เสมอ (ได้สำเนาทั้งก้อน ไม่เห็นค่าครึ่งๆ กลางๆ)
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var current: Config = load()
+    static var config: Config { lock.withLock { current } }
 
     private static func load() -> Config {
         guard let data = try? Data(contentsOf: Paths.config) else { return Config() }
@@ -247,15 +256,22 @@ enum Store {
         }
     }
 
+    /// ห้ามอ่าน Store.config ใน change (lock ไม่ซ้อน) — ใช้ค่าจาก $0 แทน
     static func update(_ change: (inout Config) -> Void) {
-        change(&config)
+        lock.withLock { change(&current) }
         save()
     }
 
     static func save() {
         let enc = JSONEncoder()
         enc.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
-        if let data = try? enc.encode(config) { Files.writeSecure(data, to: Paths.config) }
+        guard var data = try? enc.encode(config) else { return }
+        // appHints: เก็บเฉพาะที่ผู้ใช้แก้ — ค่าเริ่มต้นใหม่ของแอปเวอร์ชันหลังจะถึงผู้ใช้เดิมด้วย (ไม่ถูกแช่แข็งไว้ในไฟล์)
+        if var obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any], let hints = obj["appHints"] as? [String: String] {
+            obj["appHints"] = hints.filter { Config.defaultHints[$0.key] != $0.value }
+            if let d = try? JSONSerialization.data(withJSONObject: obj, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]) { data = d }
+        }
+        Files.writeSecure(data, to: Paths.config)
     }
 }
 
@@ -269,7 +285,7 @@ enum Keys {
             guard !t.hasPrefix("#"), let eq = t.firstIndex(of: "=") else { continue }
             var v = String(t[t.index(after: eq)...]).trimmingCharacters(in: .whitespaces)
             if v.count >= 2, v.hasPrefix("\""), v.hasSuffix("\"") { v = String(v.dropFirst().dropLast()) }
-            out[String(t[..<eq])] = v
+            out[t[..<eq].trimmingCharacters(in: .whitespaces)] = v   // "GEMINI_API_KEY = ..." ก็อ่านได้
         }
         return out
     }
@@ -300,24 +316,28 @@ enum Keys {
 
     /// ค่าที่ผู้ใช้ตั้งเองใน .env (ไม่รวม fallback) — ไว้แสดงในหน้าตั้งค่า
     static var savedElevenLabs: String { env()["ELEVENLABS_API_KEY"] ?? "" }
+    /// key ที่บันทึกในไฟล์เท่านั้น (ไม่รวมตัวแปร GEMINI_API_KEY ของ shell) — ช่องในหน้าตั้งค่าใช้ค่านี้ ไม่งั้นกดบันทึกแล้ว key จาก shell ถูกเขียนลงไฟล์
+    static var savedGemini: String { env()["GEMINI_API_KEY"] ?? "" }
 }
 
-/// log → ~/logs/whisperfirst.log
+/// log → ~/Library/Logs/WhisperFirst/whisperfirst.log (สิทธิ์ 600, หมุนไฟล์ที่ 2MB)
 enum Log {
     private static let q = DispatchQueue(label: "wf.log")
+    nonisolated(unsafe) private static let stamp = ISO8601DateFormatter()   // ใช้บน q เท่านั้น
     static var echo = false   // CLI พิมพ์ออกจอด้วย
 
     /// เขียนทันทีแบบ synchronous (ใช้ตอนแอปกำลังล่ม)
     static func writeNow(_ s: String) {
         let line = Data("\(ISO8601DateFormatter().string(from: Date())) | \(s)\n".utf8)
         guard let h = try? FileHandle(forWritingTo: Paths.log) else { return }
-        try? h.seekToEnd(); try? h.write(contentsOf: line); try? h.close()
+        _ = try? h.seekToEnd(); try? h.write(contentsOf: line); try? h.close()
     }
 
     static func write(_ s: String) {
         if echo { FileHandle.standardError.write("· \(s)\n".data(using: .utf8)!) }
-        let line = "\(ISO8601DateFormatter().string(from: Date())) | \(s)\n"
+        let now = Date()
         q.async {
+            let line = "\(stamp.string(from: now)) | \(s)\n"
             let fm = FileManager.default
             try? fm.createDirectory(at: Paths.log.deletingLastPathComponent(), withIntermediateDirectories: true,
                                     attributes: [.posixPermissions: 0o700])
@@ -328,7 +348,7 @@ enum Log {
             }
             if let h = try? FileHandle(forWritingTo: Paths.log) {
                 defer { try? h.close() }
-                try? h.seekToEnd(); try? h.write(contentsOf: Data(line.utf8))   // แบบ throw: ดิสก์เต็มไม่ทำแอปล่ม
+                _ = try? h.seekToEnd(); try? h.write(contentsOf: Data(line.utf8))   // แบบ throw: ดิสก์เต็มไม่ทำแอปล่ม
             } else {
                 fm.createFile(atPath: Paths.log.path, contents: line.data(using: .utf8), attributes: [.posixPermissions: 0o600])
             }

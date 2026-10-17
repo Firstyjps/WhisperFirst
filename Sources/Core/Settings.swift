@@ -38,12 +38,15 @@ final class SettingsModel: ObservableObject {
     }
     @Published var offlineFallback = Store.config.offlineFallback { didSet { Store.update { $0.offlineFallback = offlineFallback } } }
     @Published var elevenLabsFallback = Store.config.elevenLabsFallback { didSet { Store.update { $0.elevenLabsFallback = elevenLabsFallback } } }
+    /// เปลี่ยน Launch at Login ไม่สำเร็จ → บอกเหตุผลใต้สวิตช์ (ไม่ใช่เด้งกลับเงียบๆ)
+    @Published var loginError: String?
     /// เปิดตอนเข้าสู่ระบบ (SMAppService — ตัวเดียวกับในเมนู)
     @Published var loginItem = SMAppService.mainApp.status == .enabled {
         didSet {
             guard loginItem != (SMAppService.mainApp.status == .enabled) else { return }
+            loginError = nil
             do { if loginItem { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() } }
-            catch { Log.write("login item: \(error.localizedDescription)") }
+            catch { Log.write("login item: \(error.localizedDescription)"); loginError = "Couldn't change this — \(error.localizedDescription)" }
             refreshLogin()   // สวิตช์ต้องตรงกับสถานะจริงเสมอ (ล้มเหลว → เด้งกลับ)
         }
     }
@@ -63,7 +66,7 @@ final class SettingsModel: ObservableObject {
     @Published var advancedOpen = false
     @Published var showKey = false
     @Published var models = Store.config.models.joined(separator: ", ")
-    @Published var geminiKey = Keys.gemini ?? ""
+    @Published var geminiKey = Keys.savedGemini
     @Published var elevenKey = Keys.savedElevenLabs
     @Published var saved = false
     let aboutMe = TextFileModel(url: Paths.aboutMe)
@@ -140,7 +143,7 @@ struct SettingsPage: View {
                         .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Theme.chip))
                 }
                 divider
-                row("Open when I log in", s.loginNeedsApproval ? "Waiting for your approval in System Settings → Login Items" : nil) {
+                row("Open when I log in", s.loginNeedsApproval ? "Waiting for your approval in System Settings → Login Items" : s.loginError) {
                     HStack(spacing: 8) {
                         if s.loginNeedsApproval {
                             Button("Open") { SMAppService.openSystemSettingsLoginItems() }.buttonStyle(PillButtonStyle())
@@ -208,7 +211,7 @@ struct SettingsPage: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(checking ? "Checking…" : ok ? "Everything is working" : "Something needs attention").font(Theme.rounded(17, .semibold))
                     Text(checking ? "Looking at your microphone, typing access and connection"
-                         : ok ? "Microphone, typing access and connection all look good · checked just now"
+                         : ok ? "Microphone, typing access and connection all look good · checked \(Self.ago(checkup.checkedAt))"
                          : "Fix the item below, then check again")
                         .font(.system(size: 12.5)).foregroundStyle(Theme.muted)
                 }
@@ -230,11 +233,17 @@ struct SettingsPage: View {
                     NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
                 }
                 tile("Connection", checkup.online ? "Online · replies in about \(secs) \(secs == 1 ? "second" : "seconds")"
-                                                  : "Can't reach the AI — check the internet or your API key",
+                                                  : (checkup.problem ?? "Can't reach the AI — check the internet or your API key"),
                      checkup.online, checking) { s.advancedOpen = true }
             }
         }
         .padding(20).wfCard()
+    }
+
+    private static func ago(_ d: Date?) -> String {
+        guard let d else { return "just now" }
+        let m = Int(Date().timeIntervalSince(d) / 60)
+        return m < 1 ? "just now" : "\(m) min ago"
     }
 
     private func tile(_ title: String, _ detail: String, _ ok: Bool, _ checking: Bool, fix: @escaping () -> Void) -> some View {
@@ -342,7 +351,7 @@ struct SettingsPage: View {
             }
             .padding(.horizontal, 20).padding(.bottom, 12)
             divider
-            row("Keep a history on this Mac", "Shown in History · never uploaded") { toggle("Keep a history on this Mac", $s.keepHistory) }
+            row("Keep a history on this Mac", s.keepHistory ? "Shown in History · never uploaded" : "Off · what's already saved stays until it expires or you clear it") { toggle("Keep a history on this Mac", $s.keepHistory) }
             divider
             row("Keep history for") {
                 Segmented(items: [(7, "7 days"), (30, "30 days"), (0, "Forever")], selection: s.historyDays, capsule: false, fontSize: 12.5) { s.historyDays = $0 }

@@ -45,14 +45,20 @@ cp defaults/* "$NEW/Contents/Resources/defaults/"
 codesign --force --sign "$SIGN_ID" --identifier com.kron.whisperfirst --options runtime \
   --entitlements WhisperFirst.entitlements --timestamp=none "$NEW"
 codesign --verify --strict "$NEW"
-rm -rf "$APP"
-mv "$NEW" "$APP"
-/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$APP"
 
-# 4) รีสตาร์ทแอปให้ใช้โค้ดใหม่
+# 4) ปิดตัวเก่าก่อนสลับ (ไม่สลับไฟล์ใต้แอปที่ยังรันอยู่) — ปิดไม่ลงจริง = หยุด ไม่รายงานว่าสำเร็จ
 if pgrep -x WhisperFirst >/dev/null; then
   osascript -e 'tell application id "com.kron.whisperfirst" to quit' 2>/dev/null || pkill -x WhisperFirst
   for i in {1..10}; do pgrep -x WhisperFirst >/dev/null || break; sleep 0.5; done
+  if pgrep -x WhisperFirst >/dev/null; then pkill -x WhisperFirst; sleep 1; fi
+  pgrep -x WhisperFirst >/dev/null && { echo "❌ ปิด WhisperFirst ตัวเก่าไม่ได้ — ตัวใหม่อยู่ที่ $NEW (ยังไม่ได้สลับ)"; exit 1; }
 fi
-[[ "${NO_OPEN:-}" == 1 ]] || open "$APP"
+rm -rf "$APP"
+mv "$NEW" "$APP"
+/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$APP"
+if [[ "${NO_OPEN:-}" != 1 ]]; then
+  open "$APP"
+  for i in {1..10}; do pgrep -x WhisperFirst >/dev/null && break; sleep 0.5; done
+  pgrep -x WhisperFirst >/dev/null || { echo "❌ ติดตั้งแล้วแต่เปิดแอปไม่ขึ้น — ดู ~/Library/Logs/WhisperFirst/whisperfirst.log"; exit 1; }
+fi
 echo "✅ WhisperFirst อัปเดตแล้ว"

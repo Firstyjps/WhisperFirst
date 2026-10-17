@@ -151,6 +151,7 @@ struct RawEditor: View {
                 .wfOutline(16)
             HStack(spacing: 12) {
                 if m.saved { Text("Saved ✓").font(.system(size: 12.5, weight: .medium)).foregroundStyle(Theme.successText) }
+                else if m.dirty { Text("Unsaved changes").font(.system(size: 12.5, weight: .medium)).foregroundStyle(Theme.muted) }
                 Button("Save") { m.save(); onSave() }.buttonStyle(PrimaryButtonStyle()).keyboardShortcut("s", modifiers: .command)
             }
         }

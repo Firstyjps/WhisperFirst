@@ -72,6 +72,22 @@ enum AX {
         return s
     }
 
+    /// ช่องที่โฟกัสเป็นช่องรหัสผ่านไหม · nil = ไม่รู้ (อ่าน Accessibility ไม่ได้)
+    static func focusedFieldIsSecure() -> Bool? {
+        guard let el = focusedElement() else { return nil }
+        if isSecure(el) { return true }
+        return string(el, kAXRoleAttribute) == nil ? nil : false
+    }
+
+    /// หน้าต่างของช่องที่โฟกัส (ไว้เทียบว่าผู้ใช้ย้ายไปช่อง/แชทอื่นไหม)
+    static func focusedWindow() -> AXUIElement? {
+        guard let el = focusedElement() else { return nil }
+        var v: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(el, kAXWindowAttribute as CFString, &v) == .success, let v,
+              CFGetTypeID(v) == AXUIElementGetTypeID() else { return nil }
+        return (v as! AXUIElement)
+    }
+
     /// ช่องที่โฟกัสอ่านค่าผ่าน Accessibility ได้ไหม (ได้ = รู้ว่า "ไม่ได้เลือกอะไร" จริง)
     static func focusedFieldReadable() -> Bool {
         guard let el = focusedElement(), !isSecure(el) else { return false }
@@ -86,6 +102,7 @@ enum Inserter {
     /// คลิปบอร์ดเดิมที่รอคืน — ถ้าวางซ้ำก่อนคืน ให้ใช้ชุดเดิม (ไม่ snapshot ข้อความของเราเองทับ)
     private static var pendingRestore: [NSPasteboardItem]?
     private static var restoreWork: DispatchWorkItem?
+    private static let slowPasteApps = ["com.parallels.", "com.vmware.", "com.utmapp.", "com.microsoft.rdc", "com.teamviewer.", "com.anydesk.", "com.realvnc."]
 
     static func paste(_ text: String, restore: Bool) {
         let pb = NSPasteboard.general
@@ -113,7 +130,10 @@ enum Inserter {
             if !saved.isEmpty { pb.writeObjects(saved) }
         }
         restoreWork = w
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2, execute: w)   // เผื่อแอปช้า (Electron/VM) ก่อนคืน
+        // เผื่อแอปช้าก่อนคืน · VM/remote desktop อ่านคลิปบอร์ดช้ากว่านั้นมาก → รอนานขึ้น
+        let front = NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? ""
+        let slow = slowPasteApps.contains { front.hasPrefix($0) }
+        DispatchQueue.main.asyncAfter(deadline: .now() + (slow ? 3.0 : 1.2), execute: w)
     }
 
     /// ใส่คลิปบอร์ดอย่างเดียว (ไม่วาง) — ตอนสลับแอป/ช่องรหัสผ่าน/อัดยาวเกิน
@@ -127,10 +147,14 @@ enum Inserter {
 
     /// ข้อความที่เลือกอยู่: ลอง Accessibility ก่อน · อ่านช่องได้แต่ไม่ได้เลือกอะไร = ไม่มี (ไม่ ⌘C — VS Code จะก๊อปทั้งบรรทัด)
     /// อ่านไม่ได้ (แอป Electron บางตัว) → ⌘C แล้วคืนคลิปบอร์ด (รวมกรณีแอปตอบช้า)
+    @MainActor   // NSPasteboard ต้องใช้บน main
     static func selectedText() async -> String? {
         if let s = AX.selectedText() { return s }
         if AX.focusedFieldReadable() { return nil }
+        if AX.focusedFieldIsSecure() == true { return nil }   // ช่องรหัสผ่าน → ห้าม ⌘C
         let pb = NSPasteboard.general
+        // ยังรอคืนคลิปบอร์ดเดิมจากการวางรอบก่อน → ของเดิมคือชุดนั้น ไม่ใช่ข้อความที่เราเพิ่งวาง
+        if let p = pendingRestore { restoreWork?.cancel(); restoreWork = nil; pendingRestore = nil; pb.clearContents(); if !p.isEmpty { pb.writeObjects(p) } }
         let saved = snapshot(pb)
         let before = pb.changeCount
         key(8 /* C */, flags: .maskCommand)
@@ -151,10 +175,18 @@ enum Inserter {
         return s?.isEmpty == false ? s : nil
     }
 
+    /// สำเนาคลิปบอร์ด — เกิน 20 MB (รูป/ไฟล์ใหญ่) ไม่คัดลอกทุกชนิดบน main: เก็บแค่ข้อความ (ภาพใหญ่หายจากคลิปบอร์ดหลังวาง ดีกว่าค้าง)
     private static func snapshot(_ pb: NSPasteboard) -> [NSPasteboardItem] {
-        (pb.pasteboardItems ?? []).map { item in
+        var total = 0
+        let limit = 20_000_000
+        return (pb.pasteboardItems ?? []).map { item in
             let copy = NSPasteboardItem()
-            for t in item.types { if let d = item.data(forType: t) { copy.setData(d, forType: t) } }
+            for t in item.types {
+                guard total < limit || t == .string, let d = item.data(forType: t) else { continue }
+                total += d.count
+                if total > limit && t != .string { continue }
+                copy.setData(d, forType: t)
+            }
             return copy
         }
     }
@@ -197,48 +229,78 @@ struct HistoryEntry: Codable, Identifiable {
 enum History {
     /// ประวัติเปลี่ยน → หน้าต่างหลักอัปเดต (object = HistoryEntry ใหม่ หรือ nil = โหลดใหม่ทั้งหมด)
     static let changed = Notification.Name("WFHistoryChanged")
+    /// ทุกการเขียนไฟล์ (เพิ่ม/ลบ/ล้าง/ตัดเก่า) ผ่านคิวนี้คิวเดียว — ไม่มี read-modify-write ซ้อนกัน
+    private static let q = DispatchQueue(label: "wf.history")
+    nonisolated(unsafe) private static var lastPrune = Date.distantPast   // ใช้บน q เท่านั้น
 
     /// บันทึก (ถ้าผู้ใช้เปิดเก็บประวัติ) · ไฟล์สิทธิ์ 600 · ส่งรายการใหม่ให้หน้าต่างแทรกเลย
     static func append(_ e: HistoryEntry) {
         guard Store.config.keepHistory else { return }
         guard var line = try? JSONEncoder().encode(e) else { return }
         line.append(0x0A)
-        if let h = try? FileHandle(forWritingTo: Paths.history) {
-            defer { try? h.close() }
-            // API แบบ throw: ดิสก์เต็ม/ไฟล์หาย → ทิ้งบรรทัดนี้ ไม่ทำแอปล่ม (แบบเก่า seekToEndOfFile/write โยน NSException)
-            do { try h.seekToEnd(); try h.write(contentsOf: line) } catch { Log.write("history: บันทึกไม่ได้ (\(error.localizedDescription))") }
-        } else {
-            FileManager.default.createFile(atPath: Paths.history.path, contents: line, attributes: [.posixPermissions: 0o600])
+        q.async {
+            if let h = try? FileHandle(forWritingTo: Paths.history) {
+                defer { try? h.close() }
+                // API แบบ throw: ดิสก์เต็ม/ไฟล์หาย → ทิ้งบรรทัดนี้ ไม่ทำแอปล่ม (แบบเก่า seekToEndOfFile/write โยน NSException)
+                do { try h.seekToEnd(); try h.write(contentsOf: line) } catch { Log.write("history: บันทึกไม่ได้ (\(error.localizedDescription))") }
+            } else {
+                FileManager.default.createFile(atPath: Paths.history.path, contents: line, attributes: [.posixPermissions: 0o600])
+                excludeFromBackup()
+            }
+            // เก็บตามจำนวนวันที่ตั้ง: ตัดของเก่าระหว่างใช้งานด้วย (ไม่ใช่แค่ตอนเปิดแอป) — อย่างมากชั่วโมงละครั้ง
+            if Date().timeIntervalSince(lastPrune) > 3600 { pruneNow() }
+            DispatchQueue.main.async { NotificationCenter.default.post(name: changed, object: e) }
         }
-        DispatchQueue.main.async { NotificationCenter.default.post(name: changed, object: e) }
     }
 
     static func delete(_ t: Double) {
-        rewrite { $0.t != t }
+        q.async { if rewrite(keep: { $0.t != t }) { postReload() } }
     }
 
     /// ลบทั้งหมด
     static func clear() {
-        try? FileManager.default.removeItem(at: Paths.history)
+        q.async {
+            try? FileManager.default.removeItem(at: Paths.history)
+            postReload()
+        }
+    }
+
+    /// เก็บไว้ตามจำนวนวันที่ตั้ง (0 = ตลอดไป) — เปิดแอป / เปลี่ยนค่า / ระหว่างใช้ (ชั่วโมงละครั้ง)
+    static func prune() {
+        q.async { if pruneNow() { postReload() } }
+    }
+
+    @discardableResult
+    private static func pruneNow() -> Bool {
+        lastPrune = Date()
+        let days = Store.config.historyDays
+        guard days > 0 else { return false }
+        let cutoff = Date().addingTimeInterval(-Double(days) * 86400).timeIntervalSince1970
+        return rewrite { $0.t >= cutoff }
+    }
+
+    private static func postReload() {
         DispatchQueue.main.async { NotificationCenter.default.post(name: changed, object: nil) }
     }
 
-    /// เก็บไว้ตามจำนวนวันที่ตั้ง (0 = ตลอดไป) — เรียกตอนเปิดแอป
-    static func prune() {
-        let days = Store.config.historyDays
-        guard days > 0 else { return }
-        let cutoff = Date().addingTimeInterval(-Double(days) * 86400).timeIntervalSince1970
-        rewrite { $0.t >= cutoff }
+    /// ประวัติเป็นข้อความที่พูดทั้งหมด (plaintext) → ไม่ให้ไปอยู่ใน Time Machine/iCloud backup
+    private static func excludeFromBackup() {
+        var u = Paths.history
+        var v = URLResourceValues(); v.isExcludedFromBackup = true
+        try? u.setResourceValues(v)
     }
 
-    private static func rewrite(keep: (HistoryEntry) -> Bool) {
-        guard let s = try? String(contentsOf: Paths.history, encoding: .utf8) else { return }
+    /// true = ไฟล์เปลี่ยน
+    private static func rewrite(keep: (HistoryEntry) -> Bool) -> Bool {
+        guard let s = try? String(contentsOf: Paths.history, encoding: .utf8) else { return false }
         let dec = JSONDecoder()
         let lines = s.split(separator: "\n")
         let kept = lines.filter { l in (try? dec.decode(HistoryEntry.self, from: Data(l.utf8))).map(keep) ?? false }
-        guard kept.count != lines.count else { return }
+        guard kept.count != lines.count else { return false }
         let data = Data((kept.joined(separator: "\n") + (kept.isEmpty ? "" : "\n")).utf8)
-        Files.writeSecure(data, to: Paths.history)
+        let ok = Files.writeSecure(data, to: Paths.history)
+        excludeFromBackup()
+        return ok
     }
 
     static func recent(_ n: Int = 200) -> [HistoryEntry] {
@@ -254,7 +316,7 @@ enum Files {
     @discardableResult
     static func writeSecure(_ data: Data, to url: URL) -> Bool {
         let fm = FileManager.default
-        try? fm.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? fm.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         let tmp = url.deletingLastPathComponent().appendingPathComponent(".\(url.lastPathComponent).\(UUID().uuidString.prefix(8))")
         guard fm.createFile(atPath: tmp.path, contents: data, attributes: [.posixPermissions: 0o600]) else {
             Log.write("file: เขียน \(url.lastPathComponent) ไม่ได้")

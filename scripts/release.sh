@@ -22,7 +22,8 @@ swift build -c release --product WhisperFirst
 BIN_DIR="$(swift build -c release --show-bin-path)"
 
 DIST=dist; STAGE="$DIST/stage"; APP="$STAGE/WhisperFirst.app"
-rm -rf "$STAGE" "$DIST/WhisperFirst.dmg"
+OUT="$DIST/WhisperFirst-$VERSION.dmg"
+rm -rf "$STAGE" "$OUT.tmp.dmg"   # DMG เดิม (ตัวที่แจกอยู่) ยังไม่ลบ จนกว่าตัวใหม่จะผ่านการตรวจ
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/prompts" "$APP/Contents/Resources/defaults"
 cp "$BIN_DIR/WhisperFirst" "$APP/Contents/MacOS/WhisperFirst"
 cp Info.plist "$APP/Contents/Info.plist"
@@ -37,8 +38,24 @@ codesign --force --sign "$SIGN_ID" --identifier com.kron.whisperfirst --options 
 codesign --verify --strict "$APP"
 
 ln -s /Applications "$STAGE/Applications"   # ลากแอปลงตรงนี้
-hdiutil create -volname "WhisperFirst" -srcfolder "$STAGE" -fs HFS+ -format UDZO -imagekey zlib-level=9 -ov "$DIST/WhisperFirst.dmg" >/dev/null
+hdiutil create -volname "WhisperFirst" -srcfolder "$STAGE" -fs HFS+ -format UDZO -imagekey zlib-level=9 -ov "$OUT.tmp.dmg" >/dev/null
 rm -rf "$STAGE"
-SIZE=$(du -h "$DIST/WhisperFirst.dmg" | cut -f1 | tr -d ' ')
-echo "✅ $DIST/WhisperFirst.dmg · v$VERSION · $SIZE · $(lipo -archs "$BIN_DIR/WhisperFirst") · commit $SHA"
-echo "   sha256 $(shasum -a 256 "$DIST/WhisperFirst.dmg" | cut -d' ' -f1)   ← ใส่ใน RELEASE ของ docs/assets/main.js"
+
+# ตรวจของที่อยู่ใน DMG จริง (ไม่ใช่แค่ที่ประกอบไว้): signature · เวอร์ชัน · macOS ขั้นต่ำ · prompts
+MNT=$(mktemp -d)
+hdiutil attach -nobrowse -readonly -mountpoint "$MNT" "$OUT.tmp.dmg" >/dev/null
+trap 'hdiutil detach "$MNT" >/dev/null 2>&1 || true' EXIT
+A="$MNT/WhisperFirst.app"
+codesign --verify --strict --deep "$A" || { echo "❌ signature ใน DMG ไม่ผ่าน"; exit 1; }
+[[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$A/Contents/Info.plist")" == "$VERSION" ]] || { echo "❌ เวอร์ชันใน DMG ไม่ตรง"; exit 1; }
+[[ "$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$A/Contents/Info.plist")" == "14.2" ]] || { echo "❌ LSMinimumSystemVersion ไม่ใช่ 14.2"; exit 1; }
+ls "$A/Contents/Resources/prompts/"*.md >/dev/null 2>&1 || { echo "❌ ไม่มี prompts ใน DMG"; exit 1; }
+hdiutil detach "$MNT" >/dev/null; trap - EXIT
+
+mv -f "$OUT.tmp.dmg" "$OUT"
+cp -f "$OUT" "$DIST/WhisperFirst.dmg"   # ชื่อคงที่ที่ deploy.sh / หน้าเว็บใช้
+SUM=$(shasum -a 256 "$OUT" | cut -d' ' -f1)
+echo "$SUM  WhisperFirst-$VERSION.dmg" > "$OUT.sha256"
+SIZE=$(du -h "$OUT" | cut -f1 | tr -d ' ')
+echo "✅ $OUT (+ $DIST/WhisperFirst.dmg) · v$VERSION · $SIZE · $(lipo -archs "$BIN_DIR/WhisperFirst") · commit $SHA"
+echo "   sha256 $SUM   ← ใส่ใน RELEASE ของ docs/assets/main.js (เก็บไว้ใน $OUT.sha256 ด้วย)"

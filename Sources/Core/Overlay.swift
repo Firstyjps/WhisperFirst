@@ -455,7 +455,9 @@ private struct Spinner: View {
 private struct Shimmer: View {
     let text: String
     var body: some View {
-        TimelineView(.animation) { ctx in
+        // พูดยาวหลายนาที → ข้อความยาวมาก: วาดเฉพาะท้าย (เห็นแค่บรรทัดเดียวอยู่แล้ว) และ 30 fps พอ
+        let text = String(self.text.suffix(160))
+        TimelineView(.periodic(from: .now, by: 1.0 / 30)) { ctx in
             let phase = CGFloat(ctx.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1.6) / 1.6)
             Text(text).font(.system(size: 13)).lineLimit(1).truncationMode(.head)
                 .foregroundStyle(.white.opacity(0.45))
@@ -487,6 +489,7 @@ final class OverlayPanel {
     private let model: OverlayModel
     private var monitors: [Any] = []
     private var timer: Timer?
+    private var screenObserver: NSObjectProtocol?
 
     init(model: OverlayModel) {
         self.model = model
@@ -507,14 +510,27 @@ final class OverlayPanel {
             MainActor.assumeIsolated { self?.trackMouse() } }) { monitors.append(g) }
         if let l = NSEvent.addLocalMonitorForEvents(matching: mask, handler: { [weak self] e in
             MainActor.assumeIsolated { self?.trackMouse() }; return e }) { monitors.append(l) }
-        NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.reposition() }
+        // จอเปลี่ยน: ตอนว่างตามจอหลัก · ระหว่างพูด/เกลา อยู่จอเดิม (ไม่กระโดดไปจออื่นกลางประโยค) — จอนั้นถูกถอด → ไปจอที่เมาส์อยู่
+        screenObserver = NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                if self.model.phase == .idle { self.reposition() } else { self.reposition(screen: self.panel.screen ?? self.screenWithMouse()) }
+            }
         }
         // ตอนว่าง: ตามจอหลัก (จอที่มีหน้าต่างที่ใช้อยู่) ไปเรื่อยๆ
         timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { if self?.model.phase == .idle { self?.reposition() } }
         }
         applySettings()
+    }
+
+    /// ถอดตัวฟังเมาส์/จอ/timer ทั้งหมด (ปิดแอป)
+    func invalidate() {
+        monitors.forEach { NSEvent.removeMonitor($0) }
+        monitors = []
+        if let o = screenObserver { NotificationCenter.default.removeObserver(o) }
+        screenObserver = nil
+        timer?.invalidate(); timer = nil
     }
 
     func applySettings() {

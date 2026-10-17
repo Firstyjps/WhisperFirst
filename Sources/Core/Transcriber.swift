@@ -263,7 +263,11 @@ final class Transcriber {
         // cloud ล่มหมด → ถอดในเครื่อง
         if fallback, input.transcript == nil, !input.command, cfg.offlineFallback, LocalWhisper.available {
             Log.write("cloud ใช้ไม่ได้ → ถอดในเครื่อง")
-            if let r = try? await local(input, t0) { return r }
+            do { return try await local(input, t0) } catch {
+                try Task.checkCancellation()
+                Log.write("local (สำรอง) ล้ม: \(error.localizedDescription)")   // ไม่ทิ้งเงียบ — รู้ว่าทางในเครื่องก็ล้มด้วย
+                errors.append("On this Mac: \(error.localizedDescription)")
+            }
         }
         throw WFError(errors.joined(separator: "\n"))
     }

@@ -103,6 +103,13 @@ enum Keys2 {
             kVK_F1: "F1", kVK_F2: "F2", kVK_F3: "F3", kVK_F4: "F4", kVK_F5: "F5", kVK_F6: "F6", kVK_F7: "F7", kVK_F8: "F8",
             kVK_F9: "F9", kVK_F10: "F10", kVK_F11: "F11", kVK_F12: "F12", kVK_F13: "F13", kVK_F14: "F14", kVK_F15: "F15",
             kVK_F16: "F16", kVK_F17: "F17", kVK_F18: "F18", kVK_F19: "F19", kVK_F20: "F20",
+            kVK_Help: "help", kVK_ISO_Section: "§", kVK_JIS_Yen: "¥", kVK_JIS_Underscore: "_", kVK_JIS_KeypadComma: "num,",
+            kVK_JIS_Eisu: "英数", kVK_JIS_Kana: "かな",
+            kVK_ANSI_Keypad0: "num0", kVK_ANSI_Keypad1: "num1", kVK_ANSI_Keypad2: "num2", kVK_ANSI_Keypad3: "num3",
+            kVK_ANSI_Keypad4: "num4", kVK_ANSI_Keypad5: "num5", kVK_ANSI_Keypad6: "num6", kVK_ANSI_Keypad7: "num7",
+            kVK_ANSI_Keypad8: "num8", kVK_ANSI_Keypad9: "num9", kVK_ANSI_KeypadDecimal: "num.", kVK_ANSI_KeypadMultiply: "num*",
+            kVK_ANSI_KeypadPlus: "num+", kVK_ANSI_KeypadClear: "clear", kVK_ANSI_KeypadDivide: "num/", kVK_ANSI_KeypadEnter: "enter",
+            kVK_ANSI_KeypadMinus: "num-", kVK_ANSI_KeypadEquals: "num=",
         ]
         if let s = special[c] { return s }
         let ansi: [Int: String] = [
@@ -316,9 +323,7 @@ final class ShortcutEngine {
 
     private func updateModifiers(_ e: CGEvent) {
         let raw = e.flags.rawValue
-        let bits: [(String, UInt64)] = [("lctrl", 0x01), ("rctrl", 0x2000), ("lshift", 0x02), ("rshift", 0x04),
-                                         ("lcmd", 0x08), ("rcmd", 0x10), ("lopt", 0x20), ("ropt", 0x40)]
-        for (t, b) in bits { if raw & b != 0 { pressed.insert(t) } else { pressed.remove(t) } }
+        for (t, b) in Self.modifierBits { if raw & b != 0 { pressed.insert(t) } else { pressed.remove(t) } }
         let code = e.getIntegerValueField(.keyboardEventKeycode)
         if code == Int64(kVK_Function) || code == 179 {
             if e.flags.contains(.maskSecondaryFn) { pressed.insert("fn") } else { pressed.remove("fn") }
@@ -329,12 +334,38 @@ final class ShortcutEngine {
 
     /// ปุ่ม/เมาส์ที่ค้างอยู่ในสถานะแต่จริงๆ ปล่อยไปแล้ว (keyUp หลุด เช่นตอนช่องรหัสผ่านเปิด secure input)
     private func pruneStale() {
+        let flags = CGEventSource.flagsState(.combinedSessionState)
         for t in pressed {
-            if t.hasPrefix("k:"), let c = UInt16(t.dropFirst(2)), !CGEventSource.keyState(.combinedSessionState, key: c) { pressed.remove(t) }
+            var gone = false
+            if t.hasPrefix("k:"), let c = UInt16(t.dropFirst(2)), !CGEventSource.keyState(.combinedSessionState, key: c) { gone = true }
             if t.hasPrefix("m:"), let n = UInt32(t.dropFirst(2)), let b = CGMouseButton(rawValue: n),
-               !CGEventSource.buttonState(.combinedSessionState, button: b) { pressed.remove(t) }
+               !CGEventSource.buttonState(.combinedSessionState, button: b) { gone = true }
+            // modifier ที่ event ปล่อยหลุดไป (secure input / สลับ space) → ไม่งั้นค้างว่ากดอยู่ทั้งที่ปล่อยแล้ว
+            if checkModifierState {
+                if let bit = Self.modifierBits.first(where: { $0.0 == t })?.1, flags.rawValue & bit == 0 { gone = true }
+                if t == "fn", !flags.contains(.maskSecondaryFn) { gone = true }
+            }
+            if gone { lostRelease(t) }
         }
     }
+
+    /// ปล่อยปุ่มไปแล้วแต่ไม่ได้ event → จบปุ่มลัดที่กดค้างอยู่ตามที่ผู้ใช้ตั้งใจ (ปล่อย = จบพูด) ไม่ให้ไมค์ค้าง
+    private func lostRelease(_ token: String) {
+        let inCombo: (KeyCombo) -> Bool = { $0.contains(token) || $0.contains(Keys2.agnostic(token)) }
+        if let a = active, inCombo(a.combo) {
+            active = nil
+            fire(a.action, .up)
+            Log.write("shortcuts: \(token) ปล่อยแล้วแต่ event หาย → จบ \(a.action.rawValue)")
+        }
+        if let p = pending, inCombo(p.combo) { pending = nil }
+        pressed.remove(token)
+    }
+
+    /// เทียบ modifier กับสถานะจริงของคีย์บอร์ด — เทส (ป้อน event จำลอง) ปิดไว้ เพราะคีย์บอร์ดจริงไม่ได้กดอะไร
+    var checkModifierState = true
+
+    private static let modifierBits: [(String, UInt64)] = [("lctrl", 0x01), ("rctrl", 0x2000), ("lshift", 0x02), ("rshift", 0x04),
+                                                            ("lcmd", 0x08), ("rcmd", 0x10), ("lopt", 0x20), ("ropt", 0x40)]
 
     // MARK: จับคู่
 

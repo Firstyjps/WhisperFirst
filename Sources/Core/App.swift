@@ -30,6 +30,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             if others.contains(where: { !$0.isTerminated }) { Log.write("ตัวเก่าไม่ยอมปิด → ปิดตัวนี้แทน"); NSApp.terminate(nil); return }
         }
         Paths.seedFromBundle()
+        try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: Paths.support.path)   // ข้อมูลส่วนตัว: เจ้าของอ่านได้คนเดียว
         LocalWhisper.cleanupOrphanAtLaunch()   // ครั้งก่อนแอปล่ม → whisper-server (~3 GB) ค้างอยู่ → ปิดตั้งแต่เปิดแอป ไม่รอใช้ครั้งถัดไป
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         let menu = NSMenu()
@@ -41,7 +42,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         controller.onStateChange = { [weak self] in self?.updateIcon() }
         controller.start()
 
-        DispatchQueue.global(qos: .utility).async { History.prune() }   // ลบประวัติเกินระยะที่ตั้งไว้
+        History.prune()   // ลบประวัติเกินระยะที่ตั้งไว้ (ทำบนคิวของ History)
         // ติดตั้งใหม่ → ไกด์เป็นคนขอสิทธิ์ทีละขั้น (ไม่เด้ง dialog ระบบใส่ตั้งแต่เปิดแอป)
         let firstRun = !Store.config.onboarded
         if !firstRun { AVCaptureDevice.requestAccess(for: .audio) { ok in if !ok { Log.write("ไม่ได้สิทธิ์ไมค์") } } }
@@ -128,7 +129,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         menu.addItem(.separator())
         menu.addItem(item("Paste Last Transcript\(keys(.pasteLast))", #selector(pasteLast)))
         let retry = item("↻ Retry Last Recording", #selector(retryLast))
-        retry.isEnabled = controller.lastInput != nil
+        retry.isEnabled = controller.retryInput != nil
         menu.addItem(retry)
         menu.addItem(item("Add Selection to Dictionary\(keys(.addWord))", #selector(addWord)))
         if let l = controller.learner.lastLearned {
@@ -143,6 +144,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         menu.addItem(item("Welcome Guide…", #selector(openGuide)))
         menu.addItem(item("Show Data Folder", #selector(openFolder)))
         menu.addItem(.separator())
+        // เวอร์ชันที่ติดตั้ง — เทียบกับหน้าเว็บได้ว่าต้องอัปเดตไหม
+        let v = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"
+        let ver = NSMenuItem(title: "WhisperFirst \(v)", action: nil, keyEquivalent: "")
+        ver.isEnabled = false
+        menu.addItem(ver)
         menu.addItem(item("Quit WhisperFirst", #selector(quit)))
     }
 
@@ -240,15 +246,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         let first = !Store.config.onboarded
         if first {
             Store.update { $0.onboarded = true }
-            // ข้ามไกด์ตั้งแต่ต้น → ยังไม่มีใครขอสิทธิ์ → ขอตอนนี้ (แบบเดิมตอนเปิดแอป)
-            if AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined {
-                AVCaptureDevice.requestAccess(for: .audio) { ok in if !ok { Log.write("ไม่ได้สิทธิ์ไมค์") } }
-            }
-            if !AX.trusted { AX.prompt() }
-            // ลำโพงจอ: ขอสิทธิ์ฟังเสียงระบบตอนนี้ ไม่ให้ dialog เด้งกลางประโยคแรก
-            if !askedSystemAudio, Store.config.muteWhileTalking != .off, AudioDucker.pausesInsteadOfLowering { PlaybackProbe.requestPermission() }
+            // ข้าม/ปิดไกด์ = ผู้ใช้ไม่อยากถูกถามตอนนี้ → ไม่เด้ง dialog ระบบใส่ทันที
+            // สิทธิ์ที่ขาดดูได้จากเมนู (⚠️) และหน้า Settings · ไมค์ macOS ถามเองตอนกดพูดครั้งแรก
+            if !askedSystemAudio { Log.write("guide: ปิดก่อนขอสิทธิ์ System Audio — จะถามตอนต้องหยุดเพลงครั้งแรก") }
         }
-        hub?.settings.geminiKey = Keys.gemini ?? ""
+        controller.prewarmMic()   // ติดตั้งใหม่: ไกด์ขอสิทธิ์ไมค์เสร็จแล้ว → เตรียมตัวลดเสียงรบกวนตอนนี้
+        hub?.settings.geminiKey = Keys.savedGemini
         // ครั้งแรก → พาเข้าหน้าหลักต่อ (ยังไม่มี key → หน้า Settings) · เปิดซ้ำทีหลัง → กลับไปอยู่ menu bar
         if first { DispatchQueue.main.async { self.showHub(Keys.gemini == nil ? .settings : .home) } }
         else if hubWindow?.isVisible != true { DispatchQueue.main.async { NSApp.setActivationPolicy(.accessory) } }
@@ -267,7 +270,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
 
     /// ปิดแอประหว่างพูด → คืนเสียงลำโพงก่อน
     func applicationWillTerminate(_ n: Notification) {
+        // แก้ไฟล์ค้างไว้ (พจนานุกรมแบบข้อความ / About you) แล้วปิดแอป → บันทึกให้ ไม่หาย
+        for f in [hub?.dictionary.raw, hub?.settings.aboutMe].compactMap({ $0 }) where f.dirty { f.save() }
         controller.restoreAudio()
+        overlayPanel?.invalidate()
         LocalWhisper.shared.stop()   // ไม่ทิ้งโมเดล ~3 GB ค้างใน RAM
     }
 

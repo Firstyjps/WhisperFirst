@@ -2,12 +2,15 @@ import AVFoundation
 import ObjCTry
 
 /// อัดเสียงจากไมค์ default → PCM16 16kHz mono ส่งต่อทีละก้อน (~20ms) ให้ DictationSession
-/// เปิดไมค์เฉพาะตอนกดค้าง (ไฟไมค์สีส้มของ macOS ติดเฉพาะตอนพูด)
+/// เปิดไมค์ตั้งแต่กดปุ่มลง (เก็บเสียงช่วงแรกไว้ ไม่ให้คำแรกขาด) จนปล่อยปุ่ม/จบแฮนด์ฟรี — ไฟไมค์สีส้มติดช่วงนั้น รวมถึงตอนแตะสั้นๆ ด้วย
 final class Recorder {
     /// ระดับเสียง (RMS 0…1) — เรียกบน main thread
     var onLevel: ((Float) -> Void)?
     /// เสียงแต่ละก้อน + RMS — เรียกบน audio thread
     var onChunk: ((Data, Float) -> Void)?
+    /// ไมค์/อุปกรณ์เสียงเปลี่ยนระหว่างอัด (เช่นต่อ AirPods กลางประโยค) → engine หยุดเงียบๆ — แจ้งบน main ให้จบรอบนี้
+    var onInterrupted: (() -> Void)?
+    private var recObserver: NSObjectProtocol?
 
     private var engine: AVAudioEngine?
     private var converter: AVAudioConverter?
@@ -74,11 +77,11 @@ final class Recorder {
         if voiceProcessing, let w = warm, w.inputNode.outputFormat(forBus: 0).sampleRate > 0 {
             e = w; vp = true
         } else if voiceProcessing {
+            // ยังเตรียมตัวลดเสียงรบกวนไม่เสร็จ → อัดแบบปกติไปก่อน (เปิด voice processing ตรงนี้ค้าง main ~0.9 วิ คำแรกขาด)
+            // แล้วค่อยเตรียมไว้ให้รอบหน้าหลังปิดไมค์
             discardWarm()
-            e = AVAudioEngine()   // ยังเตรียมไม่เสร็จ → เปิดตรงนี้ (ช้าครั้งแรก)
-            do { try e.inputNode.setVoiceProcessingEnabled(true); Self.limitDucking(e.inputNode); vp = true; adopt(e) } catch {
-                Log.write("mic: เปิดตัวลดเสียงรบกวนไม่ได้ (\(error.localizedDescription)) → อัดแบบปกติ")
-            }
+            e = AVAudioEngine()
+            Log.write("mic: ตัวลดเสียงรบกวนยังไม่พร้อม → รอบนี้อัดแบบปกติ")
         } else {
             discardWarm()
             e = AVAudioEngine()
@@ -100,9 +103,24 @@ final class Recorder {
             input.installTap(onBus: 0, bufferSize: 1024, format: inFormat) { [weak self] buf, _ in self?.handle(buf) }
         }, &err)
         if !ok { discardWarm(); throw err ?? WFError("เปิดไมค์ไม่ได้") }
-        e.prepare()
-        do { try e.start() } catch { input.removeTap(onBus: 0); discardWarm(); throw error }
+        // prepare/start โยน NSException ได้ (อุปกรณ์หลุดกลางทาง) → จับไว้ ไม่ให้แอปล่ม
+        var startErr: Error?
+        let started = WFObjCTry({
+            e.prepare()
+            do { try e.start() } catch { startErr = error }
+        }, &err)
+        if !started || startErr != nil {
+            input.removeTap(onBus: 0); discardWarm()
+            throw startErr ?? err ?? WFError("เปิดไมค์ไม่ได้")
+        }
         engine = e
+        recObserver = NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: e, queue: .main) { [weak self] _ in
+            guard let self, self.engine === e else { return }
+            Log.write("mic: อุปกรณ์เสียงเปลี่ยนระหว่างอัด → จบรอบนี้")
+            self.stop()
+            self.discardWarm()
+            self.onInterrupted?()
+        }
         let ms = Int(Date().timeIntervalSince(t0) * 1000)
         if ms > 300 { Log.write("mic: เปิดไมค์ช้า \(ms)ms\(vp ? " (ลดเสียงรบกวน)" : "")") }
     }
@@ -131,10 +149,13 @@ final class Recorder {
 
     func stop() {
         guard let e = engine else { return }
+        if let o = recObserver { NotificationCenter.default.removeObserver(o) }
+        recObserver = nil
         e.inputNode.removeTap(onBus: 0)
         e.stop()   // engine ที่ลดเสียงรบกวนเก็บไว้ใช้รอบหน้า (ไมค์ปิดแล้ว)
         engine = nil
         converter = nil
+        if voiceProcessing, warm == nil { DispatchQueue.main.async { [weak self] in self?.prewarm() } }   // รอบนี้อัดแบบปกติ → เตรียมไว้ให้รอบหน้า
     }
 }
 

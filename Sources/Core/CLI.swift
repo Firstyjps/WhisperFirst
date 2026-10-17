@@ -30,7 +30,7 @@ public enum WFCLI {
         if args.count >= 2, args[1] == "seed-test" { return seedTest() }
         if args.count >= 2, args[1] == "audit-test" { return auditTest() }
         guard args.count >= 3, args[1] == "transcribe" else {
-            print("ใช้: wf stream <file.wav> [--gap 0.5] [--nospec]   (จำลองพูดตามเวลาจริง วัดเวลาหลังปล่อยปุ่ม)")
+            print("ใช้: wf stream <file.wav> [--gap 0.5] [--gain 1] [--live] [--app ชื่อ] [--bundle id]   (จำลองพูดตามเวลาจริง วัดเวลาหลังปล่อยปุ่ม)")
             print("    wf learn \"ข้อความที่ระบบวาง\" \"ข้อความหลังแก้\"   (ทดสอบ diff + การตัดสินคำ ไม่เขียนพจนานุกรม)")
             print("ใช้: wf transcribe <file.wav> [--app ชื่อแอป] [--bundle id] [--before \"ข้อความก่อนเคอร์เซอร์\"] [--command --selected \"ข้อความ\"]")
             exit(1)
@@ -41,7 +41,7 @@ public enum WFCLI {
             return args[i + 1]
         }
         guard let wav = try? Data(contentsOf: URL(fileURLWithPath: args[2])) else { print("อ่านไฟล์ไม่ได้"); exit(1) }
-        let input = DictationInput(wav: wav, seconds: Double(max(0, wav.count - 44)) / 32000,
+        let input = DictationInput(wav: wav, seconds: Double(Self.pcm(wav).count) / 32000,
                                    command: args.contains("--command"),
                                    appName: opt("--app") ?? "Notes", bundleID: opt("--bundle") ?? "com.apple.Notes",
                                    before: opt("--before"), selected: opt("--selected"))
@@ -53,19 +53,35 @@ public enum WFCLI {
                 print(r.text)
             } catch {
                 print("ERROR: \(error.localizedDescription)")
+                exit(1)   // สคริปต์ที่เรียกต้องรู้ว่าล้ม
             }
             sem.signal()
         }
         sem.wait()
     }
 
+    /// PCM จากไฟล์ WAV — หา chunk "data" จริง (header ไม่ได้ยาว 44 byte เสมอ เช่นไฟล์ที่มี LIST/fact)
+    static func pcm(_ wav: Data) -> Data {
+        let b = [UInt8](wav)
+        guard b.count > 12, String(bytes: b[0..<4], encoding: .ascii) == "RIFF" else { return wav }
+        var i = 12
+        while i + 8 <= b.count {
+            let id = String(bytes: b[i..<i + 4], encoding: .ascii) ?? ""
+            let n = Int(b[i + 4]) | Int(b[i + 5]) << 8 | Int(b[i + 6]) << 16 | Int(b[i + 7]) << 24
+            if id == "data" { return wav.subdata(in: (i + 8)..<min(b.count, i + 8 + n)) }
+            i += 8 + n + (n & 1)
+        }
+        return Data()
+    }
+
     /// ป้อนไฟล์เสียงทีละ 20ms ตามเวลาจริง (เหมือนไมค์) → ปล่อยปุ่มหลังจบไฟล์ `gap` วิ → วัดเวลาที่เหลือ
     static func stream(_ args: [String]) {
         Log.echo = true
         let gap = Double(opt(args, "--gap") ?? "0.5") ?? 0.5
-        guard let wav = try? Data(contentsOf: URL(fileURLWithPath: args[2])), wav.count > 44 else { print("อ่านไฟล์ไม่ได้"); exit(1) }
-        let pcm = wav.subdata(in: 44..<wav.count)
-        let s = DictationSession(transcriber: Transcriber(), appName: opt(args, "--app") ?? "Notes", bundleID: "com.apple.Notes")
+        guard let wav = try? Data(contentsOf: URL(fileURLWithPath: args[2])) else { print("อ่านไฟล์ไม่ได้"); exit(1) }
+        let pcm = Self.pcm(wav)
+        guard !pcm.isEmpty else { print("ไม่พบเสียงในไฟล์"); exit(1) }
+        let s = DictationSession(transcriber: Transcriber(), appName: opt(args, "--app") ?? "Notes", bundleID: opt(args, "--bundle") ?? "com.apple.Notes")
         let gain = Double(opt(args, "--gain") ?? "1") ?? 1   // จำลองไมค์เบา เช่น 0.12
         if args.contains("--live"), let key = Keys.gemini {
             let l = LiveTranscriber()
@@ -84,7 +100,7 @@ public enum WFCLI {
                 var c = pcm.subdata(in: i..<min(i + chunk, pcm.count))
                 if gain != 1 {
                     let n = c.count / 2
-                    c.withUnsafeMutableBytes { p in let b = p.bindMemory(to: Int16.self); for k in 0..<n { b[k] = Int16(Double(b[k]) * gain) } }
+                    c.withUnsafeMutableBytes { p in let b = p.bindMemory(to: Int16.self); for k in 0..<n { b[k] = Int16(max(-32768, min(32767, Double(b[k]) * gain))) } }   // gain > 1 ไม่ล้น
                 }
                 var sum: Float = 0
                 c.withUnsafeBytes { p in for v in p.bindMemory(to: Int16.self) { let f = Float(v) / 32768; sum += f * f } }
@@ -101,7 +117,7 @@ public enum WFCLI {
                 let r = try await s.finish()
                 print("[\(r.model) หลังปล่อย \(Int(Date().timeIntervalSince(released) * 1000))ms\(s.usedEarly ? " เกลาล่วงหน้า" : s.usedText ? " ข้อความLive" : " ส่งเสียง")]")
                 print(r.text)
-            } catch { print("ERROR: \(error.localizedDescription)") }
+            } catch { print("ERROR: \(error.localizedDescription)"); exit(1) }
             sem.signal()
         }
         sem.wait()
@@ -166,6 +182,15 @@ public enum WFCLI {
             var r = CFRange(location: caret, length: 0)
             AXUIElementSetAttributeValue(area, kAXSelectedTextRangeAttribute as CFString, AXValueCreate(.cfRange, &r)!)
         }
+        // ทดสอบนี้เขียนพจนานุกรมจริง → สำรองไว้ก่อน แล้วคืนทุกทาง (จบปกติ / Ctrl-C)
+        let backup = DictionaryFile.read()
+        let restore = { if let b = backup { DictionaryFile.write(b) } }
+        print("⚠️ ทดสอบกับพจนานุกรมจริง (สำรองไว้แล้ว จะคืนให้ตอนจบหรือกด Ctrl-C)")
+        signal(SIGINT, SIG_IGN)
+        let sig = DispatchSource.makeSignalSource(signal: SIGINT, queue: .main)
+        sig.setEventHandler { restore(); print("\nคืนพจนานุกรมแล้ว"); exit(130) }
+        sig.resume()
+        defer { restore(); sig.cancel() }
         let before = "บันทึกประชุม: "
         let inserted = "อัปเดตสถานะ knock-knock กับ Alphast ใน Vault ด้วย"
         let after = "\nบรรทัดถัดไป"
@@ -195,6 +220,7 @@ public enum WFCLI {
     /// ป้อน key event จำลองเข้า ShortcutEngine (ไม่ได้กดปุ่มจริง) แล้วตรวจว่ายิง action / กลืนปุ่ม ถูกต้อง
     static func shortcutsTest() {
         let e = ShortcutEngine()
+        e.checkModifierState = false   // event จำลอง: คีย์บอร์ดจริงไม่ได้กด
         var log: [String] = []
         e.onAction = { a, p in log.append("\(a.rawValue).\(p)") }
         e.onShift = { log.append("shift") }
@@ -385,8 +411,8 @@ public enum WFCLI {
 
     /// ป้อนไฟล์เสียงตามเวลาจริงเข้า LiveTranscriber แล้วพิมพ์ข้อความสดที่ได้
     static func liveTest(_ path: String) {
-        guard let key = Keys.gemini, let wav = try? Data(contentsOf: URL(fileURLWithPath: path)), wav.count > 44 else { print("ไม่มีคีย์/ไฟล์"); exit(1) }
-        let pcm = wav.subdata(in: 44..<wav.count)
+        guard let key = Keys.gemini, let wav = try? Data(contentsOf: URL(fileURLWithPath: path)) else { print("ไม่มีคีย์/ไฟล์"); exit(1) }
+        let pcm = Self.pcm(wav)
         let l = LiveTranscriber()
         let t0 = Date()
         var last = ""
@@ -439,7 +465,7 @@ public enum WFCLI {
         Task {
             for f in files {
                 guard let wav = try? Data(contentsOf: URL(fileURLWithPath: f)) else { continue }
-                let pcm = wav.count > 44 ? wav.subdata(in: 44..<wav.count) : Data()
+                let pcm = Self.pcm(wav)
                 let input = DictationInput(wav: WAV.encode(pcm: WAV.normalized(pcm)), seconds: Double(pcm.count) / 32000, appName: "", bundleID: "")
                 let t0 = Date()
                 do {
@@ -462,6 +488,7 @@ public enum WFCLI {
         let cases: [(String, String)] = [
             ("อีเมลงาน", "me@work.com"),
             ("อีเมลงานครับ", "me@work.com"),
+            ("ส่งอีเมลล์ไปแล้ว", "ส่งอีเมลล์ไปแล้ว"),   // P2-60: คำเรียกไทยสั้นไม่ติดกลางคำที่ยาวกว่า
             ("อีเมล งาน", "me@work.com"),
             ("ส่งไปที่อีเมลงานนะ", "ส่งไปที่ me@work.com นะ"),
             ("ส่งไปที่ อีเมลงาน นะ", "ส่งไปที่ me@work.com นะ"),

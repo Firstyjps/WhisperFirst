@@ -11,6 +11,11 @@
   <key>CFBundleVersion</key><string>1</string>
   <key>LSMinimumSystemVersion</key><string>14.2</string>
   <key>LSUIElement</key><true/>
-  <key>NSAudioCaptureUsageDescription</key><string>WhisperFirst ฟังแค่ว่าเพลง/วิดีโอกำลังเล่นอยู่จริงไหม (0.15 วิ ไม่บันทึก) ก่อนหยุดให้ระหว่างที่คุณพูด</string>
-  <key>NSMicrophoneUsageDescription</key><string>WhisperFirst ใช้ไมค์เฉพาะตอนที่คุณกดปุ่มค้างเพื่อพูด หรือตอนเปิดโหมดแฮนด์ฟรี (กดอีกครั้งเพื่อจบ) แล้วส่งเสียงไปแปลงเป็นข้อความ</string>
+  <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+  <key>CFBundleDevelopmentRegion</key><string>en</string>
+  <key>LSApplicationCategoryType</key><string>public.app-category.productivity</string>
+  <key>NSHumanReadableCopyright</key><string>© 2026 Kronkasem · whisperfirst.kronkasem.com</string>
+  <key>NSHighResolutionCapable</key><true/>
+  <key>NSAudioCaptureUsageDescription</key><string>WhisperFirst checks for 0.15 s whether music or a video is really playing, so it can pause it while you talk. Nothing is recorded. · WhisperFirst ฟังแค่ว่าเพลง/วิดีโอกำลังเล่นอยู่จริงไหม (0.15 วิ ไม่บันทึก) ก่อนหยุดให้ระหว่างที่คุณพูด</string>
+  <key>NSMicrophoneUsageDescription</key><string>WhisperFirst uses the microphone only while you hold the dictation key, or in hands-free mode until you press it again, and sends that audio to be turned into text. · WhisperFirst ใช้ไมค์เฉพาะตอนที่คุณกดปุ่มค้างเพื่อพูด หรือตอนเปิดโหมดแฮนด์ฟรี (กดอีกครั้งเพื่อจบ) แล้วส่งเสียงไปแปลงเป็นข้อความ</string>
 </dict></plist>

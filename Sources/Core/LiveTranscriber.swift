@@ -9,6 +9,7 @@ final class LiveTranscriber: NSObject {
     /// ทุกช่วงได้ฉบับสุดท้ายแล้วระหว่างที่ยังกดค้าง (ผู้ใช้หยุดพูด) → (ข้อความ, จำนวนช่วง, วินาทีที่พูดจริง) — เรียกบน q
     var onSettled: ((String, Int, Double?) -> Void)?
 
+    /// แตะบน q เท่านั้น (start/send/close) — callback ของ URLSession ได้ task เป็นพารามิเตอร์ ไม่อ่าน self.task ข้าม thread
     private var task: URLSessionWebSocketTask?
     private let q = DispatchQueue(label: "wf.live")
     private var buffer = Data()
@@ -40,13 +41,16 @@ final class LiveTranscriber: NSObject {
         // key ใน header (ไม่อยู่ใน URL → ไม่หลุดไปกับ proxy log / error message)
         var req = URLRequest(url: URL(string: "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent")!)
         req.setValue(key, forHTTPHeaderField: "x-goog-api-key")
-        let t = URLSession.shared.webSocketTask(with: req)
-        task = t
-        t.resume()
-        send(["setup": ["model": "models/\(Self.model)",
-                        "generationConfig": ["responseModalities": ["TEXT"], "speechConfig": ["languageCode": "th-TH"]],
-                        "inputAudioTranscription": [String: Any]()]])
-        receive()
+        q.async {
+            guard !self.finished else { return }   // ยกเลิกไปก่อนเชื่อมต่อ
+            let t = URLSession.shared.webSocketTask(with: req)
+            self.task = t
+            t.resume()
+            self.send(["setup": ["model": "models/\(Self.model)",
+                                 "generationConfig": ["responseModalities": ["TEXT"], "speechConfig": ["languageCode": "th-TH"]],
+                                 "inputAudioTranscription": [String: Any]()]])
+            self.receive(t)
+        }
     }
 
     /// เสียงที่ต้องปิดเป็นความเงียบ (เสียง Tink ของแอปเองตอนเริ่ม) — จำนวน byte ที่เหลือ
@@ -168,8 +172,8 @@ final class LiveTranscriber: NSObject {
         task.send(.string(s)) { err in if let err { Log.write("live: ส่งไม่ได้ \(err.localizedDescription)") } }
     }
 
-    private func receive() {
-        task?.receive { [weak self] result in
+    private func receive(_ t: URLSessionWebSocketTask) {
+        t.receive { [weak self] result in
             guard let self else { return }
             switch result {
             case .failure:
@@ -187,7 +191,7 @@ final class LiveTranscriber: NSObject {
                 @unknown default: data = nil
                 }
                 if let data, let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] { self.handle(json) }
-                self.receive()
+                self.receive(t)
             }
         }
     }
