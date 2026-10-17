@@ -2,10 +2,10 @@
 (() => {
   'use strict';
 
-  // ── ปล่อยเวอร์ชันใหม่: แก้ตรงนี้ที่เดียว ──
+  // ── ข้อมูลที่หน้าเว็บแสดง (เวอร์ชัน/ขนาด/sha256) แก้ตรงนี้ที่เดียว · ตัวไฟล์ DMG อัปขึ้น server ด้วย scripts/deploy.sh ──
   const RELEASE = {
     version: '1.0.1',
-    size: '1.5 MB',
+    size: '1.6 MB',   // 1,606,879 bytes (นับแบบ 1 MB = 1,000,000)
     sha256: 'b2880313070abe7791dafc6fc773755f2185d90f50f5836029cce280fd1abfac',
     url: 'download/WhisperFirst.dmg',
   };
@@ -34,19 +34,19 @@
   ];
   const FAQS = [
     { q: 'ใส่ key แล้วขึ้นว่า key rejected หรือ quota', a: 'key rejected = key ผิดหรือคัดลอกมาไม่ครบ ให้คัดลอกใหม่ทั้งหมดจาก AI Studio แล้ววางใน Settings · quota used up = key ฟรีใช้ครบโควตาแล้ว รอสักครู่แล้วลองใหม่ หรือเปิด billing ใน AI Studio' },
-    { q: 'ฟรีไหม', a: 'แอปฟรี · ส่วน Gemini API key ขอได้ฟรีจาก Google AI Studio มีโควตาจำกัดต่อนาทีและต่อวัน ใช้พิมพ์ทั่วไปพอ ถ้าเต็มจะขึ้นเตือนบนเกาะดำ' },
-    { q: 'ทำไม Mac เตือนตอนเปิดครั้งแรก', a: 'เพราะแอปนี้ไม่ได้ลงทะเบียนนักพัฒนากับ Apple (ทำแจกเพื่อน) macOS เลยตรวจผู้พัฒนาไม่ได้ กด Open Anyway ใน System Settings → Privacy & Security ครั้งเดียวก็เปิดได้ตลอด (ดูขั้นที่ 2 ในวิธีติดตั้ง)' },
+    { q: 'ฟรีไหม', a: 'แอปฟรี · ส่วน Gemini API key ขอได้ฟรีจาก Google AI Studio มีโควตาจำกัดต่อนาทีและต่อวัน ใช้พิมพ์ทั่วไปพอ ถ้าเต็มเกาะดำจะขึ้นว่า “Gemini free quota used up” · แต่ละครั้งที่พูดส่งให้ 2 โมเดลพร้อมกันเพื่อความเร็ว จึงใช้โควตาเร็วกว่าการเรียกครั้งเดียว' },
+    { q: 'ทำไม Mac เตือนตอนเปิดครั้งแรก', a: 'เพราะแอปนี้แจกฟรีโดยไม่ได้ลงทะเบียนนักพัฒนากับ Apple macOS เลยตรวจผู้พัฒนาไม่ได้ กด Open Anyway ใน System Settings → Privacy & Security ครั้งเดียวก็เปิดได้ตลอด (ดูขั้นที่ 2 ในวิธีติดตั้ง)' },
     { q: 'ใช้กับ Mac Intel, Windows หรือ iPhone ได้ไหม', a: 'ตอนนี้ยังไม่ได้ ใช้ได้เฉพาะ Mac ชิป Apple (M1 ขึ้นไป) ที่เป็น macOS 14.2 ขึ้นไป' },
-    { q: 'ใช้กับแอปไหนได้บ้าง', a: 'ทุกช่องที่พิมพ์ได้บน Mac — แชท อีเมล เอกสาร เบราว์เซอร์ Terminal หรือ AI chat ถ้าเปลี่ยนแอประหว่างพูด ข้อความจะถูกคัดลอกลง clipboard แทนการวางผิดที่' },
-    { q: 'พูดไทยปนอังกฤษได้ไหม', a: 'ได้ ศัพท์อังกฤษจะถูกเขียนเป็นภาษาอังกฤษ เช่น Docker, Dashboard แทนการถอดเป็นตัวไทย และเพิ่มชื่อเฉพาะลงพจนานุกรมให้สะกดถูกทุกครั้งได้' },
+    { q: 'ใช้กับแอปไหนได้บ้าง', a: 'ทุกช่องที่พิมพ์ได้บน Mac ยกเว้นช่องรหัสผ่าน — แชท อีเมล เอกสาร เบราว์เซอร์ Terminal หรือ AI chat ถ้าเปลี่ยนแอปหรือย้ายไปช่องอื่นระหว่างพูด ข้อความจะถูกคัดลอกลง clipboard แทนการวางผิดที่' },
+    { q: 'พูดไทยปนอังกฤษได้ไหม', a: 'ได้ ศัพท์อังกฤษจะถูกเขียนเป็นภาษาอังกฤษ เช่น Docker, Dashboard แทนการถอดเป็นตัวไทย และเพิ่มชื่อเฉพาะลงพจนานุกรมเพื่อให้โมเดลสะกดตามได้ (ถ้าต้องการให้แทนคำแน่นอนทุกครั้ง ใช้รูปแบบ คำที่ได้ยิน => คำที่ถูก ในโหมดแก้ไขแบบข้อความ)' },
     { q: 'ถ้าคำไหนถอดผิด ต้องทำยังไง', a: 'แก้ในช่องพิมพ์ตามปกติ แอปจะดูว่าเป็นคำที่ฟังผิดหรือไม่ แล้วจำไว้ให้เอง หรือเลือกคำแล้วกด Ctrl + Option + D เพื่อเพิ่มลงพจนานุกรมทันที' },
     { q: 'เสียงและข้อความของฉันไปไหน', a: 'เสียงส่งตรงจาก Mac ไป Google Gemini ด้วย key ของคุณ ไม่ผ่านเซิร์ฟเวอร์ของเรา พร้อมบริบทที่ช่วยให้เขียนถูก (ข้อความเกี่ยวกับฉัน คำในพจนานุกรม ชื่อแอป ข้อความก่อนเคอร์เซอร์ไม่เกิน 400 ตัว และวลีที่คุณแก้) — ปิดได้ใน Settings · ประวัติ พจนานุกรม และการตั้งค่าอยู่ในเครื่อง · ถ้าใช้ key แบบฟรี Google อาจนำข้อมูลไปปรับปรุงบริการและอาจมีคนตรวจอ่าน ถ้ากังวลให้เปิด billing ใน AI Studio หรือใช้ Private mode' },
     { q: 'ต้องต่อเน็ตตลอดไหม', a: 'ปกติต้องต่อเน็ต ถ้าอยากใช้แบบออฟไลน์ (Private mode — ขั้นสูง): 1) ติดตั้ง Homebrew แล้วรัน brew install whisper-cpp 2) โหลดโมเดล ggml-large-v3.bin (~3 GB) จาก huggingface.co/ggerganov/whisper.cpp 3) วางไว้ที่ ~/Library/Application Support/WhisperFirst/models/ 4) เปิด Settings → Privacy → Private mode · ช้ากว่าและเกลาน้อยกว่าแบบ cloud และใช้โหมดคำสั่งไม่ได้' },
-    { q: 'อัปเดตยังไง', a: 'โหลดไฟล์ใหม่จากหน้านี้ แล้วลากทับของเดิมใน Applications ไม่ต้องให้สิทธิ์ใหม่' },
+    { q: 'อัปเดตยังไง', a: 'ดูเวอร์ชันที่ติดตั้งอยู่ได้ที่เมนู W บน menu bar (บรรทัดก่อน Quit) · ถ้าเก่ากว่าหน้านี้: กด Quit WhisperFirst จากเมนูนั้นก่อน → โหลดไฟล์ใหม่ → ลากทับของเดิมใน Applications แล้วเปิดใหม่ · สิทธิ์ไมค์/Accessibility ยังอยู่ ถ้า macOS เตือนอีกให้ทำขั้น Open Anyway ซ้ำ' },
     { q: 'ใช้คู่กับ Wispr Flow ได้ไหม', a: 'ได้ แต่อย่าตั้งปุ่มลัดซ้ำกัน ไม่งั้นจะทำงานทั้งคู่' },
     { q: 'ใช้ปุ่มข้างของเมาส์ได้ไหม', a: 'ได้ ตั้งในหน้า Shortcuts ของแอป (เช่น Mouse 4 = แฮนด์ฟรี) · ค่าเริ่มต้นไม่ได้ผูกไว้ เพราะปุ่มเหล่านี้คือ Back/Forward ของเบราว์เซอร์' },
     { q: 'อยากใช้ปุ่ม fn / 🌐', a: 'ตั้ง System Settings → Keyboard → “Press 🌐 key to” เป็น Do Nothing ก่อน แล้วไปตั้งปุ่มลัดในหน้า Shortcuts ของแอป (ใช้ปุ่มข้างของเมาส์ได้ด้วย)' },
-    { q: 'ถอนการติดตั้งยังไง', a: 'ปิดแอปจาก menu bar → ลบ WhisperFirst ออกจาก Applications → ลบโฟลเดอร์ ~/Library/Application Support/WhisperFirst' },
+    { q: 'ถอนการติดตั้งยังไง', a: 'ปิด Launch at Login ในเมนูก่อน → กด Quit WhisperFirst → ลบ WhisperFirst ออกจาก Applications → ลบโฟลเดอร์ ~/Library/Application Support/WhisperFirst และ ~/Library/Logs/WhisperFirst และไฟล์ ~/Library/Preferences/com.kron.whisperfirst.plist · ถ้าอยากล้างสิทธิ์ด้วย ลบ WhisperFirst ออกจาก System Settings → Privacy & Security → Microphone และ Accessibility' },
   ];
   const DIMS = { idle: [128, 32], listening: [440, 82], thinking: [240, 40], done: [300, 40] };
 
@@ -54,7 +54,9 @@
   const $$ = (s, el = document) => Array.from(el.querySelectorAll(s));
   const clamp = (v) => Math.max(0, Math.min(1, v));
   const ease = (t) => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2);
-  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  // อ่านสดทุกครั้ง: ผู้ใช้เปลี่ยน Reduce motion ระหว่างเปิดหน้าก็ตามทัน
+  const motionQ = matchMedia('(prefers-reduced-motion: reduce)');
+  let reduce = motionQ.matches;
   const ua = navigator.userAgent;
   // iPad รุ่นใหม่รายงานตัวเป็น Macintosh → ใช้จุดสัมผัสแยก
   const isMac = /Macintosh/.test(ua) && navigator.maxTouchPoints < 2;
@@ -66,15 +68,21 @@
   $$('[data-sha]').forEach((el) => (el.textContent = RELEASE.sha256));
   const pageURL = location.href.split('#')[0];
   async function copyLink(btn) {
-    try { await navigator.clipboard.writeText(pageURL); } catch {
+    let ok = false;
+    try { await navigator.clipboard.writeText(pageURL); ok = true; } catch {
       const t = document.createElement('textarea'); t.value = pageURL; document.body.appendChild(t); t.select();
-      try { document.execCommand('copy'); } catch {} t.remove();
+      try { ok = document.execCommand('copy'); } catch {} t.remove();
     }
-    if (btn) { const old = btn.textContent; btn.textContent = 'คัดลอกแล้ว ✓'; setTimeout(() => (btn.textContent = old), 1800); }
+    if (!btn) return;
+    // จำข้อความเดิมครั้งแรกครั้งเดียว — กดรัวๆ ป้ายไม่ค้างเป็น "คัดลอกแล้ว"
+    btn.dataset.label ??= btn.textContent;
+    btn.textContent = ok ? 'คัดลอกแล้ว ✓' : 'คัดลอกไม่ได้ — กดค้างที่ลิงก์แล้วคัดลอกเอง';
+    clearTimeout(btn._t);
+    btn._t = setTimeout(() => (btn.textContent = btn.dataset.label), 1800);
   }
   $$('[data-copy]').forEach((b) => b.addEventListener('click', () => copyLink(b)));
   $$('[data-dl]').forEach((a) => {
-    if (isMac) a.href = RELEASE.url;
+    a.href = RELEASE.url;   // HTML ใส่ลิงก์ไฟล์ไว้แล้ว (ใช้ได้แม้ไม่มี JS) — ตรงนี้แค่ให้ตรงกับ RELEASE
     a.addEventListener('click', (e) => {
       if (!isMac) { e.preventDefault(); copyLink($('[data-copy]')); return; }
       // เริ่มโหลดแล้วพาไปขั้นติดตั้ง (ลิงก์ไฟล์ไม่เปลี่ยนหน้า)
@@ -121,7 +129,7 @@
     ribbon.appendChild(el);
     setTimeout(() => el.remove(), 1800);
   }
-  if (!reduce) setInterval(pop, 2200);
+  setInterval(() => { if (!reduce) pop(); }, 2200);
 
   // ── How it works ──
   const stepsOl = $('#howSteps');
@@ -162,14 +170,15 @@
   // ── Writing styles ──
   let cat = 'personal';
   const picks = {};
-  function renderStyles() {
+  // สร้างปุ่มใหม่ทุกครั้ง → จำว่าโฟกัสอยู่ที่ปุ่มไหน แล้วคืนโฟกัสหลังวาดใหม่ (คีย์บอร์ดไม่หลุดไปต้นหน้า)
+  function renderStyles(focus) {
     const c = CATS.find((x) => x.id === cat);
     const picked = picks[cat] ?? c.def;
     $('#catTabs').innerHTML = '';
     CATS.forEach((x) => {
       const b = document.createElement('button');
-      b.type = 'button'; b.textContent = x.label; b.setAttribute('aria-pressed', String(x.id === cat));
-      b.addEventListener('click', () => { cat = x.id; renderStyles(); });
+      b.type = 'button'; b.textContent = x.label; b.setAttribute('aria-pressed', String(x.id === cat)); b.dataset.k = 'cat-' + x.id;
+      b.addEventListener('click', () => { cat = x.id; renderStyles('cat-' + x.id); });
       $('#catTabs').appendChild(b);
     });
     $('#catApps').innerHTML = '<small>ใช้ใน</small>';
@@ -179,15 +188,29 @@
       const on = st.id === picked;
       const b = document.createElement('button');
       b.type = 'button'; b.className = 'style-card'; b.setAttribute('role', 'radio'); b.setAttribute('aria-checked', String(on));
-      b.innerHTML = '<span class="t"><b></b><i></i></span><span class="sub"></span><span class="ex-l">ตัวอย่าง</span><span class="ex"></span>';
+      b.dataset.k = 'style-' + st.id;
+      b.tabIndex = on ? 0 : -1;   // radio group: Tab เข้าที่ตัวที่เลือก · ลูกศรเลื่อนในกลุ่ม
+      b.setAttribute('aria-label', `${st.title} — ${st.subtitle}`);   // ชื่อสั้น ไม่อ่านประโยคตัวอย่างทั้งก้อน
+      b.innerHTML = '<span class="t"><b></b><i aria-hidden="true"></i></span><span class="sub" aria-hidden="true"></span><span class="ex-l" aria-hidden="true">ตัวอย่าง</span><span class="ex" aria-hidden="true"></span>';
       b.querySelector('.t b').textContent = st.title;
       b.querySelector('.t i').textContent = on ? '✓' : '';
       b.querySelector('.sub').textContent = st.subtitle;
       b.querySelector('.ex').textContent = st.example;
-      b.addEventListener('click', () => { picks[cat] = st.id; renderStyles(); });
+      b.addEventListener('click', () => { picks[cat] = st.id; renderStyles('style-' + st.id); });
       $('#styleCards').appendChild(b);
     });
+    if (focus) $(`[data-k="${focus}"]`)?.focus();
   }
+  $('#styleCards').addEventListener('keydown', (e) => {
+    const step = { ArrowDown: 1, ArrowRight: 1, ArrowUp: -1, ArrowLeft: -1 }[e.key];
+    if (!step) return;
+    e.preventDefault();
+    const c = CATS.find((x) => x.id === cat);
+    const i = STYLES.findIndex((x) => x.id === (picks[cat] ?? c.def));
+    const next = STYLES[(i + step + STYLES.length) % STYLES.length];
+    picks[cat] = next.id;
+    renderStyles('style-' + next.id);
+  });
   renderStyles();
 
   // ── FAQ (เปิดทีละข้อ) ──
@@ -217,7 +240,7 @@
   const speed = $('#speed'), speedStage = $('#speedStage'), counter = $('#counter');
   const howSec = $('#how'), howStage = $('#howStage');
   const reveals = $$('.reveal');
-  let off = 0, lastY = window.scrollY, lastT = 0;
+  let off = 0, lastY = window.scrollY, lastT = 0, lastCount = '';
 
   function pinned(sec) {
     const r = sec.getBoundingClientRect();
@@ -229,6 +252,12 @@
     const dt = lastT ? Math.min(64, t - lastT) : 16; lastT = t;
     const dy = y - lastY; lastY = y;
 
+    // อ่านตำแหน่งทั้งหมดก่อน แล้วค่อยเขียน — สลับอ่าน/เขียนทำให้ browser ต้องคำนวณ layout ใหม่ทุกครั้ง
+    const coverTop = reduce ? 0 : cover.getBoundingClientRect().top;
+    const revealTops = reduce ? [] : reveals.map((el) => el.getBoundingClientRect().top);
+    const p = reduce ? 1 : pinned(speed);   // speed: reduce motion → แสดงสถานะสุดท้าย
+    const hp = reduce ? 1 : pinned(howSec);
+
     if (!reduce) {
       off += dt * 0.045 + Math.abs(dy) * 0.6;
       [tpRaw, tpClean].forEach((tp) => {
@@ -236,14 +265,12 @@
         const u = tp._unit || 900;
         tp.setAttribute('startOffset', String((off % u) - u));
       });
-      hero.style.setProperty('--c', clamp(1 - cover.getBoundingClientRect().top / vh).toFixed(3));
-      reveals.forEach((el) => {
-        el.style.setProperty('--r', ease(clamp((vh - el.getBoundingClientRect().top) / (vh * (+el.dataset.span || 0.55)))).toFixed(3));
+      hero.style.setProperty('--c', clamp(1 - coverTop / vh).toFixed(3));
+      reveals.forEach((el, i) => {
+        el.style.setProperty('--r', ease(clamp((vh - revealTops[i]) / (vh * (+el.dataset.span || 0.55)))).toFixed(3));
       });
     }
 
-    // speed: reduce motion → แสดงสถานะสุดท้าย
-    const p = reduce ? 1 : pinned(speed);
     const k = clamp(p / 0.55);
     speedStage.style.setProperty('--g', ease(k).toFixed(4));
     speedStage.style.setProperty('--k', k.toFixed(4));
@@ -251,9 +278,9 @@
     speedStage.style.setProperty('--k3', clamp((k - 0.95) / 0.05).toFixed(3));
     speedStage.style.setProperty('--s', clamp((p - 0.5) / 0.2).toFixed(3));
     speedStage.style.setProperty('--t', clamp((p - 0.68) / 0.2).toFixed(3));
-    counter.textContent = (2 * k).toFixed(1);
+    const count = (2 * k).toFixed(1);
+    if (count !== lastCount) { counter.textContent = count; lastCount = count; }
 
-    const hp = reduce ? 1 : pinned(howSec);
     howStage.style.setProperty('--p', hp.toFixed(4));
     if (hp < 0.16) setHow('idle', 0, 0);
     else if (hp < 0.62) setHow('listening', Math.min(WORDS.length, Math.ceil(((hp - 0.18) / 0.4) * WORDS.length)), hp < 0.24 ? 0 : 1);
@@ -261,11 +288,27 @@
     else setHow('done', WORDS.length, 2);
   }
 
-  if (reduce) {
-    // ไม่มีลูปต่อเนื่อง: คำนวณครั้งเดียว + ตอนเลื่อน (pinned section อยู่ที่สถานะสุดท้ายเสมอ)
-    frame(0);
-  } else {
-    const loop = (t) => { frame(t); requestAnimationFrame(loop); };
+  // ลูปทำงานเฉพาะตอนมีส่วนที่ขยับอยู่บนจอ (hero/การ์ด/ส่วน pin/ตัวที่ reveal) — เลื่อนไปส่วน FAQ แล้วหยุด ไม่กินแบตเปล่าๆ
+  const watched = [hero, cover, speed, howSec, ...reveals];
+  const onScreen = new Set();
+  let running = false;
+  const loop = (t) => {
+    if (reduce || onScreen.size === 0) { running = false; lastT = 0; return; }
+    frame(t);
     requestAnimationFrame(loop);
-  }
+  };
+  const kick = () => { if (!running && !reduce && onScreen.size) { running = true; requestAnimationFrame(loop); } };
+  const io = new IntersectionObserver((es) => {
+    es.forEach((e) => (e.isIntersecting ? onScreen.add(e.target) : onScreen.delete(e.target)));
+    kick();
+  });
+  watched.forEach((el) => io.observe(el));
+
+  // ลดการเคลื่อนไหว: ไม่มีลูป · คำนวณสถานะสุดท้ายครั้งเดียว — เปลี่ยนค่าระหว่างเปิดหน้าก็ตามทัน
+  const applyMotion = () => { reduce = motionQ.matches; if (reduce) frame(0); else kick(); };
+  motionQ.addEventListener?.('change', applyMotion);
+  applyMotion();
+
+  // ฟอนต์โหลดเสร็จทีหลัง → ความยาวข้อความบน ribbon เปลี่ยน → วัดใหม่ (ไม่งั้นลูปกระตุก)
+  document.fonts?.ready.then(() => { tpRaw._unit = 0; tpClean._unit = 0; });
 })();

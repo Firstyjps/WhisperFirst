@@ -10,8 +10,17 @@
 <meta property="og:description" content="พิมพ์ด้วยเสียงภาษาไทยบน Mac ใช้ได้ทุกแอป ไทยปนอังกฤษได้ ตัด เอ่อ อ่า ให้เอง · ฟรี">
 <meta property="og:image" content="https://whisperfirst.kronkasem.com/assets/og.png">
 <meta property="og:url" content="https://whisperfirst.kronkasem.com/">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="WhisperFirst — พิมพ์ด้วยเสียงภาษาไทยบน Mac">
+<meta property="og:locale" content="th_TH">
 <meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="WhisperFirst — ไม่ต้องพิมพ์ พูดออกมาเลย">
+<meta name="twitter:description" content="พิมพ์ด้วยเสียงภาษาไทยบน Mac ใช้ได้ทุกแอป ไทยปนอังกฤษได้ ตัด เอ่อ อ่า ให้เอง · ฟรี">
+<meta name="twitter:image" content="https://whisperfirst.kronkasem.com/assets/og.png">
+<link rel="canonical" href="https://whisperfirst.kronkasem.com/">
 <meta name="theme-color" content="#FBF9F6">
+<link rel="icon" href="favicon.ico" sizes="any">
 <link rel="icon" type="image/png" href="assets/icon-64.png">
 <link rel="apple-touch-icon" href="assets/icon-180.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -20,14 +29,10 @@
 <link rel="stylesheet" href="assets/style.css">
 </head>
 <body>
-
-<div class="mobile-bar" role="status">
-  <span>WhisperFirst ใช้บน Mac — เปิดลิงก์นี้บน Mac เพื่อดาวน์โหลด</span>
-  <button type="button" data-copy>คัดลอกลิงก์</button>
-</div>
+<a class="skip" href="#main">ข้ามไปเนื้อหา</a>
 
 <nav aria-label="เมนูหลัก">
-  <a href="#top" class="brand"><img src="assets/AppIcon-1024.png" alt=""><span>WhisperFirst</span></a>
+  <a href="#top" class="brand"><img src="assets/icon-64.png" width="32" height="32" alt=""><span>WhisperFirst</span></a>
   <div class="links">
     <a href="#how" class="opt">วิธีใช้</a>
     <a href="#styles" class="opt">สไตล์</a>
@@ -35,17 +40,22 @@
     <a href="#install">ติดตั้ง</a>
     <a href="#faq">คำถาม</a>
   </div>
-  <a href="#install" class="btn" data-dl>ดาวน์โหลดสำหรับ Mac</a>
+  <a href="download/WhisperFirst.dmg" class="btn" data-dl>ดาวน์โหลดสำหรับ Mac</a>
 </nav>
 
-<main>
+<div class="mobile-bar" role="status">
+  <span>WhisperFirst ใช้บน Mac — เปิดลิงก์นี้บน Mac เพื่อดาวน์โหลด</span>
+  <button type="button" data-copy>คัดลอกลิงก์</button>
+</div>
+
+<main id="main">
 <div style="position:relative">
   <header id="top" class="hero">
     <div class="hero-inner">
       <div class="eyebrow">พิมพ์ด้วยเสียงภาษาไทย · macOS</div>
       <h1>ไม่ต้องพิมพ์<br><span>พูดออกมาเลย</span></h1>
       <p>กดค้าง Option ขวา พูด แล้วปล่อย — ได้ข้อความไทยที่เกลาแล้ว วางลงทุกแอปในราว 2 วินาที</p>
-      <a href="#install" class="btn" data-dl>ดาวน์โหลดฟรี</a>
+      <a href="download/WhisperFirst.dmg" class="btn" data-dl>ดาวน์โหลดฟรี</a>
       <div class="meta">เวอร์ชัน <span data-ver></span> · macOS 14.2 ขึ้นไป · Mac ชิป M1 ขึ้นไป</div>
     </div>
     <div class="ribbon-box" aria-hidden="true">
@@ -93,7 +103,7 @@
   <div class="speed-stage" id="speedStage">
     <div class="speed-head">
       <h2>พูดจบ ข้อความก็มาถึง</h2>
-      <p>ถอดคำสดๆ ระหว่างที่คุณพูด แล้วแข่งสองโมเดลพร้อมกัน ใครเสร็จก่อนได้วาง</p>
+      <p>ถอดคำสดๆ ระหว่างที่คุณพูด แล้วส่งให้สองโมเดลพร้อมกัน ตัวหลักเสร็จทันใช้ตัวหลัก ช้าเกินใช้ตัวที่เสร็จก่อน</p>
     </div>
 
     <div class="sticker" style="--x:-250px;--y:-150px;--dx:-320px;--dy:-120px;--rot:-12deg;--dur:3.2s" aria-hidden="true"><div><div class="st-key"><b>Option</b><small>ฝั่งขวา</small></div></div></div>
@@ -106,7 +116,7 @@
           <defs><path id="wfCircle" d="M 64,64 m -47,0 a 47,47 0 1,1 94,0 a 47,47 0 1,1 -94,0"/></defs>
           <text><textPath href="#wfCircle">พูด · เกลา · วาง · พูด · เกลา · วาง · </textPath></text>
         </svg>
-        <img src="assets/AppIcon-1024.png" alt="">
+        <img src="assets/icon-180.png" width="68" height="68" alt="">
       </div>
     </div></div>
 
@@ -120,16 +130,17 @@
         </div>
         <div class="speed-cap">ราวๆ นี้ จากปล่อยปุ่มจนข้อความถูกวาง</div>
         <div class="stats">
-          <div><b>2 โมเดล</b><span>แข่งกัน ใครเสร็จก่อนได้วาง</span></div>
+          <div><b>2 โมเดล</b><span>ยิงพร้อมกัน ไม่ต้องรอตัวที่ช้า</span></div>
           <div><b>~0.1 วิ</b><span>กดแล้วไมค์พร้อมอัด</span></div>
-          <div><b>ทุกแอป</b><span>ช่องไหนพิมพ์ได้ ช่องนั้นพูดได้</span></div>
+          <div><b>ทุกแอป</b><span>ทุกช่องที่พิมพ์ได้ ยกเว้นช่องรหัสผ่าน</span></div>
         </div>
       </div>
     </div>
   </div>
 </section>
 
-<section class="panel dark how" id="how" aria-label="วิธีใช้">
+<section class="panel dark how" id="how" aria-labelledby="howHeading">
+  <h2 class="sr-only" id="howHeading">วิธีใช้: กดค้าง Option ขวา พูด แล้วปล่อย</h2>
   <div class="how-stage" id="howStage">
     <div class="how-row">
       <div class="how-steps">
@@ -158,9 +169,9 @@
       </div>
 
       <div class="how-now" aria-live="polite">
-        <h3 id="howTitle"></h3>
-        <p id="howDesc"></p>
-        <span class="key" id="howKey"></span>
+        <h3 id="howTitle">กดค้าง Option ขวา</h3>
+        <p id="howDesc">ที่ไหนก็ได้ที่มีเคอร์เซอร์ เกาะดำบนขอบจอขยายออกมาบอกว่ากำลังฟัง</p>
+        <span class="key" id="howKey">Option ขวา</span>
       </div>
     </div>
   </div>
@@ -172,7 +183,7 @@
       <div class="head">
         <div class="eyebrow">ทุกแอป คนละน้ำเสียง</div>
         <h2>แชทก็แบบแชท อีเมลก็แบบอีเมล</h2>
-        <p class="lead">รู้ว่าข้อความจะไปวางที่แอปไหน แล้วปรับแค่การจัดรูปแบบและเครื่องหมาย — คำที่คุณพูดไม่ถูกเปลี่ยน</p>
+        <p class="lead">รู้ว่าข้อความจะไปวางที่แอปไหน แล้วปรับการจัดรูปแบบและเครื่องหมายตามสไตล์ที่เลือก ตัดคำเติม (เอ่อ อ่า) และแก้คำที่พูดพลาด — เนื้อหาที่พูดยังเหมือนเดิม</p>
       </div>
       <div class="seg" id="catTabs" role="group" aria-label="ประเภทแอป"></div>
     </div>
@@ -189,7 +200,7 @@
     </div>
     <div class="fgrid">
       <div class="fcard reveal" style="--travel:90px;--tilt:-4deg">
-        <div><h3>พจนานุกรมที่เรียนรู้เอง</h3><p>แก้คำที่ฟังผิดครั้งเดียว ครั้งหน้าสะกดถูกเอง</p></div>
+        <div><h3>พจนานุกรมที่เรียนรู้เอง</h3><p>แก้คำที่ฟังผิดครั้งเดียว ระบบจำไว้ให้โมเดลใช้ครั้งหน้า (ส่วนใหญ่สะกดตามที่แก้)</p></div>
         <div class="well dict">
           <div><span>น็อคน็อค</span><i>→</i><b>NokNok</b></div>
           <div><span>ดีพซีค</span><i>→</i><b>DeepSeek</b></div>
@@ -219,8 +230,8 @@
         </div>
       </div>
       <div class="fcard reveal" style="--travel:150px;--tilt:-3deg">
-        <div><h3>เพลงเบาลงเองตอนพูด</h3><p>ลดเสียงหรือหยุดเพลงชั่วคราว แล้วคืนค่าเดิมทันทีที่ปล่อยปุ่ม</p></div>
-        <div class="seg-static"><span>ปล่อยไว้</span><span class="on">เบาลง</span><span>ปิดเสียง</span></div>
+        <div><h3>เพลงเงียบเองตอนพูด</h3><p>ระหว่างกดพูด ปิดเสียงลำโพง (ทุกแอปบนลำโพงนั้น) หรือหยุดเพลงชั่วคราวถ้าเป็นลำโพงจอ แล้วคืนค่าเดิมทันทีที่ปล่อยปุ่ม</p></div>
+        <div class="seg-static"><span>ปล่อยไว้</span><span class="on">ปิดเสียง</span></div>
       </div>
       <div class="fcard reveal" style="--travel:120px;--tilt:2deg;background:var(--accent)">
         <div><h3>เกาะดำบนขอบจอ</h3><p style="color:var(--ink)">ห้อยจากรอยบาก บอกสถานะ ไม่แย่งโฟกัสจากแอปที่พิมพ์อยู่</p></div>
@@ -238,14 +249,14 @@
 <section class="panel privacy" id="privacy" style="z-index:7">
   <div class="wrap two">
     <div>
-      <div class="eyebrow" style="color:var(--accentT)">ความเป็นส่วนตัว</div>
+      <div class="eyebrow" style="color:var(--accentH)">ความเป็นส่วนตัว</div>
       <h2>รู้ชัดว่าอะไรออกจากเครื่อง</h2>
       <p class="lead">ไมค์เปิดตอนกดค้างปุ่ม หรือตอนเปิดแฮนด์ฟรี (กดอีกครั้งเพื่อจบ นานสุด 6 นาที) เท่านั้น · เสียงส่งตรงจาก Mac ไป Google Gemini ด้วย key ของคุณเอง ไม่ผ่านเซิร์ฟเวอร์ของเรา</p>
       <p class="lead" style="font-size:16px">ไปพร้อมเสียงด้วย เพื่อให้สะกดถูกและเขียนให้เข้ากับแอป: ข้อความ “เกี่ยวกับฉัน” · คำในพจนานุกรม · คำเรียกวลีลัด · ชื่อแอปที่กำลังพิมพ์ · ข้อความก่อนเคอร์เซอร์ไม่เกิน 400 ตัวอักษร · และเมื่อคุณแก้คำที่พิมพ์ผิด จะส่งเฉพาะวลีสั้นๆ ที่แก้ไปให้ตัดสินว่าควรจำไหม — ปิดได้ทุกอย่างใน Settings</p>
     </div>
     <div class="list-card">
-      <div><span class="check">✓</span><div><b>ประวัติ พจนานุกรม และ key เก็บในเครื่อง</b><p>อ่านได้เฉพาะบัญชีผู้ใช้ของคุณ · ปิดการเก็บประวัติ เก็บ 7 วัน 30 วัน หรือล้างทั้งหมดได้ · log ไม่บันทึกสิ่งที่พูด</p></div></div>
-      <div><span class="check">✓</span><div><b>ไม่แตะช่องรหัสผ่าน Terminal และตัวจัดการรหัสผ่าน</b><p>ไม่อ่านข้อความในแอปเหล่านี้และไม่เรียนรู้คำจากที่นั่น · ช่อง Secure Input คัดลอกลง clipboard แทนการวาง · ข้อความจากวลีลัด (อีเมล ที่อยู่) ไม่ถูกส่ง</p></div></div>
+      <div><span class="check">✓</span><div><b>ประวัติ พจนานุกรม และ key เก็บในเครื่อง</b><p>อ่านได้เฉพาะบัญชีผู้ใช้ของคุณ · ประวัติเป็นข้อความธรรมดาในเครื่อง ไม่ถูกสำรองขึ้น Time Machine · ปิดการเก็บประวัติ เก็บ 7 วัน 30 วัน หรือล้างทั้งหมดได้ · log ไม่บันทึกสิ่งที่พูด</p></div></div>
+      <div><span class="check">✓</span><div><b>ไม่แตะช่องรหัสผ่าน Terminal และตัวจัดการรหัสผ่าน</b><p>ไม่อ่านข้อความในแอปเหล่านี้และไม่เรียนรู้คำจากที่นั่น · ช่องรหัสผ่านจะไม่เริ่มฟังเลย ถ้าช่องกลายเป็นช่องรหัสผ่านระหว่างพูด ข้อความจะถูกคัดลอกลง clipboard แทนการวาง · ข้อความจากวลีลัด (อีเมล ที่อยู่) ไม่ถูกส่ง</p></div></div>
       <div><span class="check">✓</span><div><b>key ฟรี: Google อาจนำข้อมูลไปใช้</b><p>ตามเงื่อนไข Gemini API แบบไม่เสียเงิน Google อาจใช้สิ่งที่ส่งไปปรับปรุงบริการ และอาจมีคนตรวจอ่าน · ถ้ากังวลให้เปิด billing ใน AI Studio หรือใช้ Private mode</p></div></div>
       <div><span class="check">✓</span><div><b>Private mode (ขั้นสูง)</b><p>ถอดเสียงด้วย Whisper ในเครื่อง ไม่ส่งอะไรขึ้น cloud เลย — ต้องติดตั้งเพิ่มเอง (ดูคำถามท้ายหน้า) · ถ้าคุณใส่ key ของ ElevenLabs ไว้ เสียงจะไปที่นั่นเฉพาะตอน Gemini ล่ม</p></div></div>
     </div>
@@ -269,7 +280,7 @@
     <h2>โหลด ลาก เปิด แล้วพูดได้เลย</h2>
     <div class="req"><span>macOS 14.2 ขึ้นไป</span><span>Mac ชิป Apple (M1 ขึ้นไป)</span><span>ต่อเน็ต</span><span>Gemini API key ฟรี</span></div>
     <div class="dl">
-      <a class="btn" data-dl href="#install">ดาวน์โหลด WhisperFirst.dmg</a>
+      <a class="btn" data-dl href="download/WhisperFirst.dmg">ดาวน์โหลด WhisperFirst.dmg</a>
       <small>เวอร์ชัน <span data-ver></span> · <span data-size></span></small>
     </div>
     <p class="sha">SHA-256 <code data-sha></code></p>
@@ -289,17 +300,17 @@
           <li>ใส่รหัสผ่าน Mac หรือ Touch ID แล้วกด <b>Open Anyway</b> อีกครั้ง</li>
           <li>ไม่เห็นปุ่ม Open Anyway? เปิด WhisperFirst ใหม่อีกครั้ง แล้วกลับไปที่ Privacy &amp; Security ภายใน 1 ชั่วโมง</li>
         </ol>
-        <div class="note"><span aria-hidden="true">💡</span><span>ที่เตือนเพราะแอปนี้ทำแจกเพื่อน ไม่ได้ลงทะเบียนนักพัฒนากับ Apple ($99/ปี) ไม่ได้แปลว่ามีไวรัส · โค้ดทั้งหมดเปิดให้ดูได้บน <a href="https://github.com/Firstyjps/WhisperFirst">GitHub</a> · ทำครั้งเดียว ครั้งต่อไปเปิดได้ปกติ</span></div>
+        <div class="note"><span aria-hidden="true">💡</span><span>ที่เตือนเพราะแอปนี้แจกฟรีโดยไม่ได้ลงทะเบียนนักพัฒนากับ Apple ($99/ปี) macOS เลยตรวจผู้พัฒนาไม่ได้ · โค้ดเปิดให้ดูได้บน <a href="https://github.com/Firstyjps/WhisperFirst">GitHub</a> และตรวจไฟล์ได้ด้วย SHA-256 ด้านบน (<code>shasum -a 256 ~/Downloads/WhisperFirst.dmg</code>) · ทำครั้งเดียว ครั้งต่อไปเปิดได้ปกติ</span></div>
       </div></li>
       <li><div>
         <h3>ให้สิทธิ์ตามไกด์ในแอป</h3>
         <p><b>Microphone</b> — ฟังเสียงตอนกดค้างปุ่ม หรือตอนเปิดแฮนด์ฟรี · <b>Accessibility</b> — รู้ว่ากดปุ่มลัด และพิมพ์ข้อความลงแอปอื่นได้ · ถ้าใช้ลำโพงของจอ (HDMI/DisplayPort) จะมี <b>System Audio Recording</b> เพิ่ม เพื่อเช็กว่าเพลงกำลังเล่นอยู่ไหมก่อนหยุดให้ (ไม่บันทึกเสียง)</p>
-        <p>กด <b>Open Settings</b> ในไกด์ → เปิดสวิตช์ WhisperFirst → กลับมาที่ไกด์ จะติ๊กถูกให้เอง</p>
+        <p><b>Microphone</b>: กด <b>Allow</b> ในไกด์แล้วยืนยันใน dialog ของ macOS (ถ้าเคยปฏิเสธไว้ ให้กด Open Settings) · <b>Accessibility</b>: กด <b>Open Settings</b> → เปิดสวิตช์ WhisperFirst → กลับมาที่ไกด์ จะติ๊กถูกให้เอง</p>
       </div></li>
       <li><div>
         <h3>ใส่ Gemini API key (ฟรี)</h3>
         <p>เข้า Google AI Studio ด้วยบัญชี Google → กด <b>Create API key</b> → คัดลอก แล้ววางในไกด์ของแอป</p>
-        <a class="btn" href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">เปิด Google AI Studio ↗</a>
+        <a class="btn" href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">เปิด Google AI Studio <span aria-hidden="true">↗</span><span class="sr-only">(เปิดในแท็บใหม่)</span></a>
       </div></li>
       <li><div>
         <h3>ลองเลย</h3>
@@ -322,14 +333,14 @@
   <div class="foot-cta">
     <h2>เลิกพิมพ์ แล้วเริ่มพูด</h2>
     <p>ฟรี สำหรับ Mac · ใช้ Gemini key ฟรีของคุณเอง</p>
-    <a href="#install" class="btn" data-dl>ดาวน์โหลด WhisperFirst</a>
+    <a href="download/WhisperFirst.dmg" class="btn" data-dl>ดาวน์โหลด WhisperFirst</a>
   </div>
   <div class="foot-links">
-    <span>สร้างมาเพื่อคนพูดไทย · เวอร์ชัน <span data-ver></span></span>
+    <span>© 2026 Kronkasem · สร้างมาเพื่อคนพูดไทย · เวอร์ชัน <span data-ver></span></span>
     <div>
       <a href="https://github.com/Firstyjps/WhisperFirst">GitHub</a>
-      <a href="#privacy">ความเป็นส่วนตัว</a>
-      <a href="https://github.com/Firstyjps/WhisperFirst/issues">แจ้งปัญหา</a>
+      <a href="privacy.html">นโยบายความเป็นส่วนตัว</a>
+      <a href="https://github.com/Firstyjps/WhisperFirst/issues">แจ้งปัญหา / ติดต่อ</a>
     </div>
   </div>
   <div class="wordmark reveal" data-span=".22" aria-hidden="true">WhisperFirst</div>

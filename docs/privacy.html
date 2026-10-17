@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>นโยบายความเป็นส่วนตัว — WhisperFirst</title>
+<meta name="description" content="WhisperFirst เก็บอะไร ส่งอะไรไปที่ไหน และควบคุมได้อย่างไร">
+<link rel="canonical" href="https://whisperfirst.kronkasem.com/privacy.html">
+<link rel="icon" href="favicon.ico" sizes="any">
+<link rel="stylesheet" href="assets/style.css">
+<style>
+  body{background:var(--cream)}
+  .doc{max-width:760px;margin:0 auto;padding:72px 24px 96px;color:var(--ink);font-size:16.5px;line-height:1.8}
+  .doc h1{font-size:clamp(30px,5vw,44px);line-height:1.2;margin:0 0 6px;letter-spacing:-.02em}
+  .doc h2{font-size:22px;margin:40px 0 0;letter-spacing:0}
+  .doc p,.doc li{color:var(--ink2)}
+  .doc ul{padding-left:22px}
+  .doc .meta{color:var(--muted2);font-size:14px}
+  .doc code{font-family:var(--mono);font-size:14px;background:var(--sand);border-radius:6px;padding:1px 6px}
+</style>
+</head>
+<body>
+<main class="doc">
+  <p><a href="./">← กลับหน้าแรก</a></p>
+  <h1>นโยบายความเป็นส่วนตัว</h1>
+  <p class="meta">WhisperFirst · ปรับปรุงล่าสุด 17 ต.ค. 2026</p>
+
+  <p>WhisperFirst เป็นแอป Mac ที่แจกฟรี ไม่มีบัญชีผู้ใช้ ไม่มีเซิร์ฟเวอร์ของเราอยู่ระหว่างทาง ไม่มี analytics และไม่มีการติดตามใดๆ ทั้งในแอปและบนหน้าเว็บนี้</p>
+
+  <h2>สิ่งที่ส่งออกจากเครื่อง</h2>
+  <ul>
+    <li><b>เสียงที่พูด</b> ส่งตรงจาก Mac ไป Google Gemini ด้วย API key ของคุณเอง เฉพาะตอนที่กดค้างปุ่ม หรือระหว่างโหมดแฮนด์ฟรี (นานสุด 6 นาที)</li>
+    <li><b>บริบทที่ช่วยให้เขียนถูก</b> ไปพร้อมเสียง: ข้อความ “เกี่ยวกับฉัน” คำในพจนานุกรม คำเรียกวลีลัด ชื่อแอปที่กำลังพิมพ์ และข้อความก่อนเคอร์เซอร์ไม่เกิน 400 ตัวอักษร (ไม่ส่งจาก Terminal ตัวจัดการรหัสผ่าน และช่องรหัสผ่าน)</li>
+    <li><b>การเรียนรู้คำ</b>: เมื่อคุณแก้คำที่แอปพิมพ์ จะส่งเฉพาะคำที่แก้กับข้อความสั้นๆ รอบจุดนั้นไปให้ Gemini ตัดสินว่าควรจำไหม</li>
+    <li><b>ElevenLabs (ไม่บังคับ)</b>: ถ้าคุณใส่ key ไว้ เสียงจะไปที่ ElevenLabs เฉพาะตอนที่ Gemini ใช้ไม่ได้</li>
+  </ul>
+  <p>ปิดการส่งบริบทและการเรียนรู้คำได้ใน Settings · ถ้าใช้ <b>Private mode</b> จะถอดเสียงด้วย Whisper ในเครื่อง และไม่ส่งอะไรขึ้น cloud เลย</p>
+
+  <h2>Google และ key แบบฟรี</h2>
+  <p>สิ่งที่ส่งไป Gemini อยู่ภายใต้เงื่อนไขของ Google Gemini API ที่ผูกกับ key ของคุณ ถ้าใช้ key แบบไม่เสียเงิน Google อาจนำข้อมูลไปปรับปรุงบริการ และอาจมีคนตรวจอ่าน — ถ้ากังวล ให้เปิด billing ใน Google AI Studio หรือใช้ Private mode โปรดอ่านเงื่อนไขล่าสุดของ Google ประกอบ</p>
+
+  <h2>สิ่งที่เก็บในเครื่อง</h2>
+  <ul>
+    <li>การตั้งค่า พจนานุกรม วลีลัด และ API key อยู่ใน <code>~/Library/Application Support/WhisperFirst</code> อ่านได้เฉพาะบัญชีผู้ใช้ของคุณ</li>
+    <li>ประวัติการพูด (ถ้าเปิดไว้) เป็นข้อความธรรมดาในโฟลเดอร์เดียวกัน ไม่ถูกสำรองขึ้น Time Machine · เลือกเก็บ 7 วัน 30 วัน ตลอดไป ปิด หรือล้างทั้งหมดได้</li>
+    <li>log อยู่ใน <code>~/Library/Logs/WhisperFirst</code> บันทึกสถานะการทำงาน ไม่บันทึกสิ่งที่พูด</li>
+  </ul>
+
+  <h2>หน้าเว็บนี้</h2>
+  <p>ไม่มี cookie ไม่มี analytics · server เก็บ access log มาตรฐาน (IP, เวลา, หน้าที่เปิด) ไว้ดูแลระบบเท่านั้น · ฟอนต์โหลดจาก Google Fonts</p>
+
+  <h2>ลบข้อมูล</h2>
+  <p>ลบแอปและโฟลเดอร์ข้างต้นได้ตามขั้นตอนในหัวข้อ “ถอนการติดตั้งยังไง” บนหน้าแรก ข้อมูลที่ส่งไปแล้วอยู่ภายใต้นโยบายของผู้ให้บริการนั้น (Google / ElevenLabs)</p>
+
+  <h2>ติดต่อ</h2>
+  <p>แจ้งปัญหาหรือถามเรื่องความเป็นส่วนตัวได้ที่ <a href="https://github.com/Firstyjps/WhisperFirst/issues">GitHub Issues</a></p>
+</main>
+</body>
+</html>
