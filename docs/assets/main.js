@@ -4,9 +4,9 @@
 
   // ── ข้อมูลที่หน้าเว็บแสดง (เวอร์ชัน/ขนาด/sha256) แก้ตรงนี้ที่เดียว · ตัวไฟล์ DMG อัปขึ้น server ด้วย scripts/deploy.sh ──
   const RELEASE = {
-    version: '1.0.1',
-    size: '1.6 MB',   // 1,606,879 bytes (นับแบบ 1 MB = 1,000,000)
-    sha256: 'b2880313070abe7791dafc6fc773755f2185d90f50f5836029cce280fd1abfac',
+    version: '1.0.2',
+    size: '1.7 MB',   // 1,675,870 bytes (นับแบบ 1 MB = 1,000,000)
+    sha256: 'e10ef54c956c239df37072fdabb8a3c76e9ff182d3894443ed731027984cf3db',
     url: 'download/WhisperFirst.dmg',
   };
 
