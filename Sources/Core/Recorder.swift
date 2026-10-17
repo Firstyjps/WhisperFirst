@@ -29,7 +29,7 @@ final class Recorder {
             let t0 = Date()
             let e = AVAudioEngine()
             var ok = true
-            do { try e.inputNode.setVoiceProcessingEnabled(true) } catch {
+            do { try e.inputNode.setVoiceProcessingEnabled(true); Self.limitDucking(e.inputNode) } catch {
                 ok = false
                 Log.write("mic: เปิดตัวลดเสียงรบกวนไม่ได้ (\(error.localizedDescription)) → อัดแบบปกติ")
             }
@@ -41,6 +41,12 @@ final class Recorder {
                 Log.write("mic: เตรียมตัวลดเสียงรบกวนไว้ (\(Int(Date().timeIntervalSince(t0) * 1000))ms)")
             }
         }
+    }
+
+    /// เปิด voice processing แล้ว macOS ลดเสียงแอปอื่นลงมากทันที (แม้ยังไม่เปิดไมค์) → ตั้งให้ลดน้อยที่สุดทันทีหลังเปิด
+    /// ไม่งั้นเปิดเครื่อง/ตื่นจาก sleep แล้วเสียงเพลงเบาค้างจนกว่าจะกดพูดครั้งแรก · การลดเสียงเพลงตอนพูดให้ AudioDucker คุมเอง
+    private static func limitDucking(_ input: AVAudioInputNode) {
+        input.voiceProcessingOtherAudioDuckingConfiguration = .init(enableAdvancedDucking: false, duckingLevel: .min)
     }
 
     /// ไมค์/อุปกรณ์เสียงเปลี่ยน → engine ที่เตรียมไว้ใช้ไม่ได้แล้ว เตรียมใหม่
@@ -70,7 +76,7 @@ final class Recorder {
         } else if voiceProcessing {
             discardWarm()
             e = AVAudioEngine()   // ยังเตรียมไม่เสร็จ → เปิดตรงนี้ (ช้าครั้งแรก)
-            do { try e.inputNode.setVoiceProcessingEnabled(true); vp = true; adopt(e) } catch {
+            do { try e.inputNode.setVoiceProcessingEnabled(true); Self.limitDucking(e.inputNode); vp = true; adopt(e) } catch {
                 Log.write("mic: เปิดตัวลดเสียงรบกวนไม่ได้ (\(error.localizedDescription)) → อัดแบบปกติ")
             }
         } else {
@@ -79,9 +85,8 @@ final class Recorder {
         }
         let input = e.inputNode
         if vp {
-            // แอปอื่นเบาลงน้อยที่สุด (ค่าเริ่มต้นของระบบลดเสียงเพลงลงมาก) · AGC ของระบบช่วยไมค์เบา
-            input.voiceProcessingOtherAudioDuckingConfiguration = .init(enableAdvancedDucking: false, duckingLevel: .min)   // คงที่ ไม่ลดเพิ่มตอนพูด (การลดเสียงเพลงให้ AudioDucker คุมเอง)
-            input.isVoiceProcessingAGCEnabled = true
+            Self.limitDucking(input)
+            input.isVoiceProcessingAGCEnabled = true   // AGC ของระบบช่วยไมค์เบา
         }
         let inFormat = input.outputFormat(forBus: 0)
         guard inFormat.sampleRate > 0, inFormat.channelCount > 0 else { discardWarm(); throw WFError("ไม่พบไมค์") }
